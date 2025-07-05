@@ -1,72 +1,48 @@
 #include "communication.h"
 
-Communication::Communication() {
+Communication::Communication() : server(SERVER_PORT) {
     wifiSSID = nullptr;
     wifiPassword = nullptr;
     commandCallback = nullptr;
     statusCallback = nullptr;
-    
-    // 상태 초기화
-    currentStatus.currentX = 0.0;
-    currentStatus.currentY = 0.0;
-    currentStatus.targetX = 0.0;
-    currentStatus.targetY = 0.0;
-    currentStatus.isMoving = false;
-    currentStatus.isEmergencyStop = false;
-    currentStatus.currentSpeed = 200;
-    currentStatus.batteryLevel = 100.0;
-    currentStatus.lastError = "";
+
+    currentStatus = {0.0, 0.0, 0.0, 0.0, false, false, 200, 100.0, ""};
 }
 
-Communication::~Communication() {
-    // 웹서버 정리
-    server.close();
-}
+Communication::~Communication() {}
 
 void Communication::begin(const char* ssid, const char* password) {
     wifiSSID = ssid;
     wifiPassword = password;
-    
+
     Serial.println("[Communication] Initializing WiFi...");
-    
-    // WiFi 연결
     WiFi.begin(wifiSSID, wifiPassword);
-    
+
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
         delay(500);
         Serial.print(".");
         attempts++;
     }
-    
+
     if (WiFi.status() == WL_CONNECTED) {
         Serial.println();
         Serial.print("[Communication] WiFi connected. IP: ");
         Serial.println(WiFi.localIP());
-        
-        // API 엔드포인트 설정
-        server.on("/move", HTTP_POST, [this]() { handleMove(); });
-        server.on("/status", HTTP_GET, [this]() { handleStatus(); });
-        server.on("/emergency-stop", HTTP_POST, [this]() { handleEmergencyStop(); });
-        server.on("/set-speed", HTTP_POST, [this]() { handleSetSpeed(); });
-        server.onNotFound([this]() { handleNotFound(); });
-        
+
         server.begin();
-        Serial.println("[Communication] API server started");
+        Serial.println("[Communication] Server started on port 80");
     } else {
-        Serial.println();
         Serial.println("[Communication] WiFi connection failed");
     }
 }
 
 void Communication::setCommandCallback(CommandCallback callback) {
     commandCallback = callback;
-    Serial.println("[Communication] Command callback set");
 }
 
 void Communication::setStatusCallback(StatusCallback callback) {
     statusCallback = callback;
-    Serial.println("[Communication] Status callback set");
 }
 
 bool Communication::isConnected() {
@@ -78,187 +54,189 @@ String Communication::getLocalIP() {
 }
 
 void Communication::handleClient() {
-    server.handleClient();
+    WiFiClient client = server.available();
+    if (!client) return;
+
+    Serial.println("[Communication] New client connected");
+
+    String request = "";
+    while (client.connected()) {
+        if (client.available()) {
+            char c = client.read();
+            request += c;
+
+            if (request.endsWith("\r\n\r\n")) break; // End of headers
+        }
+    }
+
+    // Extract method and path
+    String method, path;
+    int firstSpace = request.indexOf(' ');
+    int secondSpace = request.indexOf(' ', firstSpace + 1);
+    if (firstSpace > 0 && secondSpace > firstSpace) {
+        method = request.substring(0, firstSpace);
+        path = request.substring(firstSpace + 1, secondSpace);
+    }
+
+    Serial.print("[Communication] Method: "); Serial.println(method);
+    Serial.print("[Communication] Path: "); Serial.println(path);
+
+    // Read body (if POST)
+    String body = "";
+    if (method == "POST") {
+        while (client.available()) {
+            body += (char)client.read();
+        }
+    }
+
+    handleClientRequest(client, method, path, body);
+
+    delay(1);
+    client.stop();
+    Serial.println("[Communication] Client disconnected");
 }
 
-void Communication::handleMove() {
-    setCORSHeaders();
-    
-    if (server.hasArg("plain")) {
-        String jsonCommand = server.arg("plain");
-        MoveCommand command = parseCommand(jsonCommand);
-        
-        if (command.isValid && commandCallback != nullptr) {
-            // 메인 컨트롤러에 명령 전달
+void Communication::handleClientRequest(WiFiClient& client, const String& method, const String& path, const String& body) {
+    if (method == "POST" && path == "/move") {
+        MoveCommand command = parseCommand(body);
+        if (command.isValid && commandCallback) {
             commandCallback(command);
-            
-            // 성공 응답
-            StaticJsonDocument<200> response;
-            response["success"] = true;
-            response["message"] = "Command executed";
-            response["command"] = commandTypeToString(command.type);
-            
-            String responseStr;
-            serializeJson(response, responseStr);
-            server.send(200, "application/json", responseStr);
-            
-            Serial.print("[Communication] Command executed: ");
-            Serial.println(commandTypeToString(command.type));
+            JSONVar res;
+            res["success"] = true;
+            res["message"] = "Command executed";
+            res["command"] = commandTypeToString(command.type);
+            sendJsonResponse(client, 200, JSON.stringify(res));
         } else {
-            // 에러 응답
-            server.send(400, "application/json", 
-                "{\"success\":false,\"message\":\"" + command.errorMessage + "\"}");
+            JSONVar res;
+            res["success"] = false;
+            res["message"] = command.errorMessage;
+            sendJsonResponse(client, 400, JSON.stringify(res));
         }
-    } else {
-        server.send(400, "application/json", 
-            "{\"success\":false,\"message\":\"No command data\"}");
-    }
-}
 
-void Communication::handleStatus() {
-    setCORSHeaders();
-    
-    // 상태 콜백이 설정되어 있으면 최신 상태 가져오기
-    if (statusCallback != nullptr) {
-        currentStatus = statusCallback();
-    }
-    
-    StaticJsonDocument<300> response;
-    response["currentX"] = currentStatus.currentX;
-    response["currentY"] = currentStatus.currentY;
-    response["targetX"] = currentStatus.targetX;
-    response["targetY"] = currentStatus.targetY;
-    response["isMoving"] = currentStatus.isMoving;
-    response["isEmergencyStop"] = currentStatus.isEmergencyStop;
-    response["currentSpeed"] = currentStatus.currentSpeed;
-    response["batteryLevel"] = currentStatus.batteryLevel;
-    response["lastError"] = currentStatus.lastError;
-    
-    String responseStr;
-    serializeJson(response, responseStr);
-    server.send(200, "application/json", responseStr);
-}
+    } else if (method == "GET" && path == "/status") {
+        if (statusCallback) {
+            currentStatus = statusCallback();
+        }
 
-void Communication::handleEmergencyStop() {
-    setCORSHeaders();
-    
-    if (commandCallback != nullptr) {
-        MoveCommand command;
-        command.type = CMD_EMERGENCY_STOP;
-        command.isValid = true;
-        
-        commandCallback(command);
-        
-        server.send(200, "application/json", 
-            "{\"success\":true,\"message\":\"Emergency stop activated\"}");
-        
-        Serial.println("[Communication] Emergency stop command sent");
-    } else {
-        server.send(500, "application/json", 
-            "{\"success\":false,\"message\":\"Command handler not set\"}");
-    }
-}
+        JSONVar res;
+        res["currentX"] = currentStatus.currentX;
+        res["currentY"] = currentStatus.currentY;
+        res["targetX"] = currentStatus.targetX;
+        res["targetY"] = currentStatus.targetY;
+        res["isMoving"] = currentStatus.isMoving;
+        res["isEmergencyStop"] = currentStatus.isEmergencyStop;
+        res["currentSpeed"] = currentStatus.currentSpeed;
+        res["batteryLevel"] = currentStatus.batteryLevel;
+        res["lastError"] = currentStatus.lastError;
 
-void Communication::handleSetSpeed() {
-    setCORSHeaders();
-    
-    if (server.hasArg("plain")) {
-        String jsonData = server.arg("plain");
-        StaticJsonDocument<200> doc;
-        deserializeJson(doc, jsonData);
-        
-        if (doc.containsKey("speed")) {
-            int speed = doc["speed"];
-            if (validateSpeed(speed)) {
-                if (commandCallback != nullptr) {
-                    MoveCommand command;
-                    command.type = CMD_SET_SPEED;
-                    command.speed = speed;
-                    command.isValid = true;
-                    
-                    commandCallback(command);
-                    
-                    server.send(200, "application/json", 
-                        "{\"success\":true,\"message\":\"Speed updated\"}");
-                    
-                    Serial.print("[Communication] Speed set to: ");
-                    Serial.println(speed);
-                }
-            } else {
-                server.send(400, "application/json", 
-                    "{\"success\":false,\"message\":\"Invalid speed value\"}");
-            }
+        sendJsonResponse(client, 200, JSON.stringify(res));
+
+    } else if (method == "POST" && path == "/emergency-stop") {
+        if (commandCallback) {
+            MoveCommand command;
+            command.type = CMD_EMERGENCY_STOP;
+            command.isValid = true;
+            commandCallback(command);
+            sendJsonResponse(client, 200, "{\"success\":true,\"message\":\"Emergency stop activated\"}");
         } else {
-            server.send(400, "application/json", 
-                "{\"success\":false,\"message\":\"Speed parameter missing\"}");
+            sendJsonResponse(client, 500, "{\"success\":false,\"message\":\"Command handler not set\"}");
         }
+
+    } else if (method == "POST" && path == "/set-speed") {
+        JSONVar data = JSON.parse(body);
+        if (JSON.typeof(data) == "undefined" || !data.hasOwnProperty("speed")) {
+            sendJsonResponse(client, 400, "{\"success\":false,\"message\":\"Speed parameter missing\"}");
+            return;
+        }
+
+        int speed = (int)data["speed"];
+        if (!validateSpeed(speed)) {
+            sendJsonResponse(client, 400, "{\"success\":false,\"message\":\"Invalid speed value\"}");
+            return;
+        }
+
+        if (commandCallback) {
+            MoveCommand command;
+            command.type = CMD_SET_SPEED;
+            command.speed = speed;
+            command.isValid = true;
+            commandCallback(command);
+            sendJsonResponse(client, 200, "{\"success\":true,\"message\":\"Speed updated\"}");
+        }
+
     } else {
-        server.send(400, "application/json", 
-            "{\"success\":false,\"message\":\"No data received\"}");
+        sendJsonResponse(client, 404, "{\"success\":false,\"message\":\"Endpoint not found\"}");
     }
 }
 
-void Communication::handleNotFound() {
-    setCORSHeaders();
-    server.send(404, "application/json", 
-        "{\"success\":false,\"message\":\"Endpoint not found\"}");
+void Communication::sendJsonResponse(WiFiClient& client, int statusCode, const String& body) {
+    client.println("HTTP/1.1 " + String(statusCode) + " OK");
+    client.println("Content-Type: application/json");
+    client.println("Access-Control-Allow-Origin: *");
+    client.println("Connection: close");
+    client.println();
+    client.println(body);
 }
 
 MoveCommand Communication::parseCommand(const String& jsonCommand) {
     MoveCommand command;
     command.isValid = false;
-    
-    StaticJsonDocument<300> doc;
-    deserializeJson(doc, jsonCommand);
-    
-    if (doc.containsKey("command")) {
-        String cmdStr = doc["command"].as<String>();
-        command.type = stringToCommandType(cmdStr);
-        
-        switch (command.type) {
-            case CMD_MOVE_TO_POSITION:
-                if (doc.containsKey("x") && doc.containsKey("y")) {
-                    command.x = doc["x"].as<double>();
-                    command.y = doc["y"].as<double>();
-                    command.speed = doc.containsKey("speed") ? doc["speed"].as<int>() : 200;
-                    
-                    if (validateCoordinates(command.x, command.y) && validateSpeed(command.speed)) {
-                        command.isValid = true;
-                    } else {
-                        command.errorMessage = "Invalid coordinates or speed";
-                    }
-                } else {
-                    command.errorMessage = "Missing coordinates";
-                }
-                break;
-                
-            case CMD_MOVE_TO_BEACON:
-                if (doc.containsKey("beaconId")) {
-                    command.beaconId = doc["beaconId"].as<String>();
-                    command.speed = doc.containsKey("speed") ? doc["speed"].as<int>() : 200;
-                    
-                    if (validateSpeed(command.speed)) {
-                        command.isValid = true;
-                    } else {
-                        command.errorMessage = "Invalid speed";
-                    }
-                } else {
-                    command.errorMessage = "Missing beacon ID";
-                }
-                break;
-                
-            case CMD_EMERGENCY_STOP:
-                command.isValid = true;
-                break;
-                
-            default:
-                command.errorMessage = "Unknown command";
-                break;
-        }
-    } else {
-        command.errorMessage = "No command specified";
+
+    JSONVar obj = JSON.parse(jsonCommand);
+    if (JSON.typeof(obj) == "undefined") {
+        command.errorMessage = "Invalid JSON";
+        return command;
     }
-    
+
+    if (!obj.hasOwnProperty("command")) {
+        command.errorMessage = "No command specified";
+        return command;
+    }
+
+    String cmdStr = (const char*)obj["command"];
+    command.type = stringToCommandType(cmdStr);
+
+    switch (command.type) {
+        case CMD_MOVE_TO_POSITION:
+            if (obj.hasOwnProperty("x") && obj.hasOwnProperty("y")) {
+                command.x = (double)obj["x"];
+                command.y = (double)obj["y"];
+                command.speed = obj.hasOwnProperty("speed") ? (int)obj["speed"] : 200;
+
+                if (validateCoordinates(command.x, command.y) && validateSpeed(command.speed)) {
+                    command.isValid = true;
+                } else {
+                    command.errorMessage = "Invalid coordinates or speed";
+                }
+            } else {
+                command.errorMessage = "Missing coordinates";
+            }
+            break;
+
+        case CMD_MOVE_TO_BEACON:
+            if (obj.hasOwnProperty("beaconId")) {
+                command.beaconId = (const char*)obj["beaconId"];
+                command.speed = obj.hasOwnProperty("speed") ? (int)obj["speed"] : 200;
+
+                if (validateSpeed(command.speed)) {
+                    command.isValid = true;
+                } else {
+                    command.errorMessage = "Invalid speed";
+                }
+            } else {
+                command.errorMessage = "Missing beacon ID";
+            }
+            break;
+
+        case CMD_EMERGENCY_STOP:
+            command.isValid = true;
+            break;
+
+        default:
+            command.errorMessage = "Unknown command";
+            break;
+    }
+
     return command;
 }
 
@@ -292,34 +270,10 @@ String Communication::commandTypeToString(CommandType type) {
     }
 }
 
-String Communication::createJsonResponse(bool success, const String& message, const JsonDocument& data) {
-    StaticJsonDocument<200> response;
-    response["success"] = success;
-    response["message"] = message;
-    
-    if (!data.isNull()) {
-        // data를 response에 병합
-        for (JsonPair kv : data.as<JsonObject>()) {
-            response[kv.key()] = kv.value();
-        }
-    }
-    
-    String responseStr;
-    serializeJson(response, responseStr);
-    return responseStr;
-}
-
-void Communication::setCORSHeaders() {
-    server.sendHeader("Access-Control-Allow-Origin", "*");
-    server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
-}
-
 bool Communication::validateSpeed(int speed) {
     return speed >= 0 && speed <= 255;
 }
 
 bool Communication::validateCoordinates(double x, double y) {
-    // 좌표 유효성 검사 (필요에 따라 수정)
     return !isnan(x) && !isnan(y) && isfinite(x) && isfinite(y);
 }

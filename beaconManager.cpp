@@ -1,14 +1,7 @@
 #include "beaconManager.h"
 
-// 전역 변수로 콜백 함수에서 접근할 수 있도록
-BeaconManager* globalBeaconManager = nullptr;
-
 BeaconManager::BeaconManager() {
-    pBLEScan = nullptr;
-    callbacks = nullptr;
-    globalBeaconManager = this;
-    
-    // 비콘 초기화
+    // 비콘 초기값 설정
     for (int i = 0; i < NUM_BEACONS; i++) {
         beacons[i].address = beaconAddresses[i];
         beacons[i].rssi = -100;
@@ -16,98 +9,81 @@ BeaconManager::BeaconManager() {
         beacons[i].x = 0.0;
         beacons[i].y = 0.0;
     }
-    
-    // 현재 위치 초기화
-    currentPosition.x = 0.0;
-    currentPosition.y = 0.0;
-    currentPosition.confidence = 0.0;
+
+    currentPosition = {0.0, 0.0, 0.0};
 }
 
 BeaconManager::~BeaconManager() {
-    if (pBLEScan) {
-        delete pBLEScan;
-    }
-    if (callbacks) {
-        delete callbacks;
-    }
+    // ArduinoBLE에는 별도 삭제 필요 없음
 }
 
-void BeaconManager::begin() {
+bool BeaconManager::begin() {
     Serial.println("[BeaconManager] Initializing BLE...");
-    
-    // BLE 초기화
-    BLEDevice::init("SCV_Robot");
-    
-    // BLE 스캐너 생성
-    pBLEScan = BLEDevice::getScan();
-    callbacks = new MyAdvertisedDeviceCallbacks();
-    pBLEScan->setAdvertisedDeviceCallbacks(callbacks);
-    pBLEScan->setActiveScan(true);
-    pBLEScan->setInterval(100);
-    pBLEScan->setWindow(99);
-    
+
+    if (!BLE.begin()) {
+        Serial.println("[BeaconManager] Failed to initialize BLE!");
+        return false;
+    }
+
     Serial.println("[BeaconManager] BLE initialized successfully");
+    return true;
 }
 
 void BeaconManager::scanBeacons() {
     Serial.println("[BeaconManager] Scanning for beacons...");
-    
-    // BLE 스캔 시작
-    BLEScanResults foundDevices = pBLEScan->start(SCAN_TIME, false);
-    
-    Serial.print("[BeaconManager] Scan complete. Found ");
-    Serial.print(foundDevices.getCount());
-    Serial.println(" devices");
-    
-    // 스캔 결과 처리
-    for (int i = 0; i < foundDevices.getCount(); i++) {
-        BLEAdvertisedDevice device = foundDevices.getDevice(i);
-        String address = device.getAddress().toString().c_str();
-        
-        // 우리가 찾는 비콘인지 확인
-        for (int j = 0; j < NUM_BEACONS; j++) {
-            if (address.equals(beacons[j].address)) {
-                beacons[j].rssi = device.getRSSI();
-                beacons[j].distance = rssiToDistance(device.getRSSI());
-                
-                Serial.print("[BeaconManager] Found beacon ");
-                Serial.print(j);
-                Serial.print(": RSSI=");
-                Serial.print(beacons[j].rssi);
-                Serial.print(", Distance=");
-                Serial.println(beacons[j].distance);
-                break;
+
+    BLE.scanForUuid("FEAA"); // Eddystone UUID 예시, 필요 시 수정
+
+    unsigned long startTime = millis();
+
+    while (millis() - startTime < SCAN_TIME_MS) {
+        BLEDevice peripheral = BLE.available();
+
+        if (peripheral) {
+            String address = peripheral.address();
+
+            // 찾는 비콘인지 확인
+            for (int i = 0; i < NUM_BEACONS; i++) {
+                if (address.equalsIgnoreCase(beacons[i].address)) {
+                    beacons[i].rssi = peripheral.rssi();
+                    beacons[i].distance = rssiToDistance(beacons[i].rssi);
+
+                    Serial.print("[BeaconManager] Found beacon ");
+                    Serial.print(i);
+                    Serial.print(": RSSI=");
+                    Serial.print(beacons[i].rssi);
+                    Serial.print(", Distance=");
+                    Serial.println(beacons[i].distance);
+                }
             }
         }
     }
+
+    BLE.stopScan();
 }
 
 RobotPosition BeaconManager::calculatePosition() {
-    // 최소 3개의 비콘이 필요
     int validBeacons = 0;
     for (int i = 0; i < NUM_BEACONS; i++) {
-        if (beacons[i].rssi > -100) {
-            validBeacons++;
-        }
+        if (beacons[i].rssi > -100) validBeacons++;
     }
-    
+
     if (validBeacons < 3) {
         Serial.println("[BeaconManager] Not enough beacons for positioning");
         currentPosition.confidence = 0.0;
         return currentPosition;
     }
-    
-    // 삼각측량 계산
+
     currentPosition = trilateration(beacons[0], beacons[1], beacons[2]);
-    currentPosition.confidence = 0.8; // 기본 신뢰도
-    
+    currentPosition.confidence = 0.8;
+
     Serial.print("[BeaconManager] Position calculated: (");
     Serial.print(currentPosition.x);
     Serial.print(", ");
     Serial.print(currentPosition.y);
     Serial.print("), Confidence: ");
     Serial.println(currentPosition.confidence);
-    
+
     return currentPosition;
 }
 
@@ -130,34 +106,24 @@ void BeaconManager::setBeaconPosition(int beaconIndex, double x, double y) {
 }
 
 double BeaconManager::rssiToDistance(int rssi) {
-    // RSSI를 거리로 변환하는 공식
-    // 실제 환경에 맞게 조정 필요
-    double distance = pow(10, (-69 - rssi) / 20.0);
+    double txPower = -69; // 기준 RSSI 값 (1m 거리)
+    double n = 2.0; // 경로 손실 지수 (환경에 따라 조정)
+
+    double distance = pow(10.0, (txPower - rssi) / (10 * n));
     return distance;
 }
 
-RobotPosition BeaconManager::trilateration(BeaconInfo beacon1, BeaconInfo beacon2, BeaconInfo beacon3) {
-    // 삼각측량 알고리즘 구현
-    // 간단한 가중 평균 방식 사용
-    
-    RobotPosition position;
-    
-    // 가중치 계산 (거리가 가까울수록 높은 가중치)
-    double weight1 = 1.0 / (beacon1.distance + 0.1);
-    double weight2 = 1.0 / (beacon2.distance + 0.1);
-    double weight3 = 1.0 / (beacon3.distance + 0.1);
-    
-    double totalWeight = weight1 + weight2 + weight3;
-    
-    // 가중 평균으로 위치 계산
-    position.x = (beacon1.x * weight1 + beacon2.x * weight2 + beacon3.x * weight3) / totalWeight;
-    position.y = (beacon1.y * weight1 + beacon2.y * weight2 + beacon3.y * weight3) / totalWeight;
-    
-    return position;
-}
+RobotPosition BeaconManager::trilateration(BeaconInfo b1, BeaconInfo b2, BeaconInfo b3) {
+    RobotPosition pos;
 
-// BLE 콜백 함수 구현
-void BeaconManager::MyAdvertisedDeviceCallbacks::onResult(BLEAdvertisedDevice advertisedDevice) {
-    // 콜백에서 필요한 경우 추가 처리
-    // 현재는 scanBeacons() 함수에서 처리
+    double w1 = 1.0 / (b1.distance + 0.1);
+    double w2 = 1.0 / (b2.distance + 0.1);
+    double w3 = 1.0 / (b3.distance + 0.1);
+
+    double totalW = w1 + w2 + w3;
+
+    pos.x = (b1.x * w1 + b2.x * w2 + b3.x * w3) / totalW;
+    pos.y = (b1.y * w1 + b2.y * w2 + b3.y * w3) / totalW;
+
+    return pos;
 }
