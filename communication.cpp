@@ -3,6 +3,8 @@
 Communication::Communication() {
     wifiSSID = nullptr;
     wifiPassword = nullptr;
+    commandCallback = nullptr;
+    statusCallback = nullptr;
     
     // 상태 초기화
     currentStatus.currentX = 0.0;
@@ -42,132 +44,41 @@ void Communication::begin(const char* ssid, const char* password) {
         Serial.print("[Communication] WiFi connected. IP: ");
         Serial.println(WiFi.localIP());
         
-        // 웹서버 설정
-        server.on("/", HTTP_GET, [this]() { handleRoot(); });
+        // API 엔드포인트 설정
         server.on("/move", HTTP_POST, [this]() { handleMove(); });
-        server.on("/position", HTTP_GET, [this]() { handlePosition(); });
         server.on("/status", HTTP_GET, [this]() { handleStatus(); });
         server.on("/emergency-stop", HTTP_POST, [this]() { handleEmergencyStop(); });
         server.on("/set-speed", HTTP_POST, [this]() { handleSetSpeed(); });
         server.onNotFound([this]() { handleNotFound(); });
         
         server.begin();
-        Serial.println("[Communication] Web server started");
+        Serial.println("[Communication] API server started");
     } else {
         Serial.println();
         Serial.println("[Communication] WiFi connection failed");
     }
 }
 
+void Communication::setCommandCallback(CommandCallback callback) {
+    commandCallback = callback;
+    Serial.println("[Communication] Command callback set");
+}
+
+void Communication::setStatusCallback(StatusCallback callback) {
+    statusCallback = callback;
+    Serial.println("[Communication] Status callback set");
+}
+
 bool Communication::isConnected() {
     return WiFi.status() == WL_CONNECTED;
 }
 
-void Communication::handleClient() {
-    server.handleClient();
+String Communication::getLocalIP() {
+    return WiFi.localIP().toString();
 }
 
-void Communication::handleRoot() {
-    setCORSHeaders();
-    
-    String html = R"(
-<!DOCTYPE html>
-<html>
-<head>
-    <title>SCV Robot Control</title>
-    <meta charset="UTF-8">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .container { max-width: 600px; margin: 0 auto; }
-        .section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
-        input, button { margin: 5px; padding: 8px; }
-        button { background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; }
-        button:hover { background: #0056b3; }
-        .status { background: #f8f9fa; padding: 10px; border-radius: 3px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>SCV Robot Control</h1>
-        
-        <div class="section">
-            <h3>Move to Position</h3>
-            <input type="number" id="posX" placeholder="X coordinate" step="0.1">
-            <input type="number" id="posY" placeholder="Y coordinate" step="0.1">
-            <input type="number" id="speed" placeholder="Speed (0-255)" min="0" max="255" value="200">
-            <button onclick="moveToPosition()">Move</button>
-        </div>
-        
-        <div class="section">
-            <h3>Emergency Stop</h3>
-            <button onclick="emergencyStop()" style="background: #dc3545;">Emergency Stop</button>
-        </div>
-        
-        <div class="section">
-            <h3>Status</h3>
-            <div id="status" class="status">Loading...</div>
-            <button onclick="updateStatus()">Refresh Status</button>
-        </div>
-    </div>
-    
-    <script>
-        async function moveToPosition() {
-            const x = document.getElementById('posX').value;
-            const y = document.getElementById('posY').value;
-            const speed = document.getElementById('speed').value;
-            
-            const response = await fetch('/move', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    command: 'move_to_position',
-                    x: parseFloat(x),
-                    y: parseFloat(y),
-                    speed: parseInt(speed)
-                })
-            });
-            
-            const result = await response.json();
-            alert(result.message);
-            updateStatus();
-        }
-        
-        async function emergencyStop() {
-            const response = await fetch('/emergency-stop', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({command: 'emergency_stop'})
-            });
-            
-            const result = await response.json();
-            alert(result.message);
-            updateStatus();
-        }
-        
-        async function updateStatus() {
-            const response = await fetch('/status');
-            const status = await response.json();
-            
-            document.getElementById('status').innerHTML = `
-                <strong>Current Position:</strong> (${status.currentX.toFixed(2)}, ${status.currentY.toFixed(2)})<br>
-                <strong>Target Position:</strong> (${status.targetX.toFixed(2)}, ${status.targetY.toFixed(2)})<br>
-                <strong>Moving:</strong> ${status.isMoving ? 'Yes' : 'No'}<br>
-                <strong>Speed:</strong> ${status.currentSpeed}<br>
-                <strong>Battery:</strong> ${status.batteryLevel.toFixed(1)}%<br>
-                <strong>Error:</strong> ${status.lastError || 'None'}
-            `;
-        }
-        
-        // 초기 상태 로드
-        updateStatus();
-        // 5초마다 상태 업데이트
-        setInterval(updateStatus, 5000);
-    </script>
-</body>
-</html>
-    )";
-    
-    server.send(200, "text/html", html);
+void Communication::handleClient() {
+    server.handleClient();
 }
 
 void Communication::handleMove() {
@@ -177,38 +88,40 @@ void Communication::handleMove() {
         String jsonCommand = server.arg("plain");
         MoveCommand command = parseCommand(jsonCommand);
         
-        // 명령 처리 (메인 로직에서 처리)
-        updateStatus(currentStatus);
-        
-        StaticJsonDocument<200> response;
-        response["success"] = true;
-        response["message"] = "Move command received";
-        response["command"] = commandTypeToString(command.type);
-        
-        String responseStr;
-        serializeJson(response, responseStr);
-        server.send(200, "application/json", responseStr);
+        if (command.isValid && commandCallback != nullptr) {
+            // 메인 컨트롤러에 명령 전달
+            commandCallback(command);
+            
+            // 성공 응답
+            StaticJsonDocument<200> response;
+            response["success"] = true;
+            response["message"] = "Command executed";
+            response["command"] = commandTypeToString(command.type);
+            
+            String responseStr;
+            serializeJson(response, responseStr);
+            server.send(200, "application/json", responseStr);
+            
+            Serial.print("[Communication] Command executed: ");
+            Serial.println(commandTypeToString(command.type));
+        } else {
+            // 에러 응답
+            server.send(400, "application/json", 
+                "{\"success\":false,\"message\":\"" + command.errorMessage + "\"}");
+        }
     } else {
-        server.send(400, "application/json", "{\"success\":false,\"message\":\"No command data\"}");
+        server.send(400, "application/json", 
+            "{\"success\":false,\"message\":\"No command data\"}");
     }
-}
-
-void Communication::handlePosition() {
-    setCORSHeaders();
-    
-    StaticJsonDocument<200> response;
-    response["currentX"] = currentStatus.currentX;
-    response["currentY"] = currentStatus.currentY;
-    response["targetX"] = currentStatus.targetX;
-    response["targetY"] = currentStatus.targetY;
-    
-    String responseStr;
-    serializeJson(response, responseStr);
-    server.send(200, "application/json", responseStr);
 }
 
 void Communication::handleStatus() {
     setCORSHeaders();
+    
+    // 상태 콜백이 설정되어 있으면 최신 상태 가져오기
+    if (statusCallback != nullptr) {
+        currentStatus = statusCallback();
+    }
     
     StaticJsonDocument<300> response;
     response["currentX"] = currentStatus.currentX;
@@ -229,16 +142,21 @@ void Communication::handleStatus() {
 void Communication::handleEmergencyStop() {
     setCORSHeaders();
     
-    currentStatus.isEmergencyStop = true;
-    currentStatus.isMoving = false;
-    
-    StaticJsonDocument<200> response;
-    response["success"] = true;
-    response["message"] = "Emergency stop activated";
-    
-    String responseStr;
-    serializeJson(response, responseStr);
-    server.send(200, "application/json", responseStr);
+    if (commandCallback != nullptr) {
+        MoveCommand command;
+        command.type = CMD_EMERGENCY_STOP;
+        command.isValid = true;
+        
+        commandCallback(command);
+        
+        server.send(200, "application/json", 
+            "{\"success\":true,\"message\":\"Emergency stop activated\"}");
+        
+        Serial.println("[Communication] Emergency stop command sent");
+    } else {
+        server.send(500, "application/json", 
+            "{\"success\":false,\"message\":\"Command handler not set\"}");
+    }
 }
 
 void Communication::handleSetSpeed() {
@@ -251,28 +169,44 @@ void Communication::handleSetSpeed() {
         
         if (doc.containsKey("speed")) {
             int speed = doc["speed"];
-            if (speed >= 0 && speed <= 255) {
-                currentStatus.currentSpeed = speed;
-                server.send(200, "application/json", "{\"success\":true,\"message\":\"Speed updated\"}");
+            if (validateSpeed(speed)) {
+                if (commandCallback != nullptr) {
+                    MoveCommand command;
+                    command.type = CMD_SET_SPEED;
+                    command.speed = speed;
+                    command.isValid = true;
+                    
+                    commandCallback(command);
+                    
+                    server.send(200, "application/json", 
+                        "{\"success\":true,\"message\":\"Speed updated\"}");
+                    
+                    Serial.print("[Communication] Speed set to: ");
+                    Serial.println(speed);
+                }
             } else {
-                server.send(400, "application/json", "{\"success\":false,\"message\":\"Invalid speed value\"}");
+                server.send(400, "application/json", 
+                    "{\"success\":false,\"message\":\"Invalid speed value\"}");
             }
         } else {
-            server.send(400, "application/json", "{\"success\":false,\"message\":\"Speed parameter missing\"}");
+            server.send(400, "application/json", 
+                "{\"success\":false,\"message\":\"Speed parameter missing\"}");
         }
     } else {
-        server.send(400, "application/json", "{\"success\":false,\"message\":\"No data received\"}");
+        server.send(400, "application/json", 
+            "{\"success\":false,\"message\":\"No data received\"}");
     }
 }
 
 void Communication::handleNotFound() {
     setCORSHeaders();
-    server.send(404, "application/json", "{\"success\":false,\"message\":\"Endpoint not found\"}");
+    server.send(404, "application/json", 
+        "{\"success\":false,\"message\":\"Endpoint not found\"}");
 }
 
 MoveCommand Communication::parseCommand(const String& jsonCommand) {
     MoveCommand command;
-    command.type = CMD_UNKNOWN;
+    command.isValid = false;
     
     StaticJsonDocument<300> doc;
     deserializeJson(doc, jsonCommand);
@@ -287,6 +221,14 @@ MoveCommand Communication::parseCommand(const String& jsonCommand) {
                     command.x = doc["x"].as<double>();
                     command.y = doc["y"].as<double>();
                     command.speed = doc.containsKey("speed") ? doc["speed"].as<int>() : 200;
+                    
+                    if (validateCoordinates(command.x, command.y) && validateSpeed(command.speed)) {
+                        command.isValid = true;
+                    } else {
+                        command.errorMessage = "Invalid coordinates or speed";
+                    }
+                } else {
+                    command.errorMessage = "Missing coordinates";
                 }
                 break;
                 
@@ -294,45 +236,34 @@ MoveCommand Communication::parseCommand(const String& jsonCommand) {
                 if (doc.containsKey("beaconId")) {
                     command.beaconId = doc["beaconId"].as<String>();
                     command.speed = doc.containsKey("speed") ? doc["speed"].as<int>() : 200;
+                    
+                    if (validateSpeed(command.speed)) {
+                        command.isValid = true;
+                    } else {
+                        command.errorMessage = "Invalid speed";
+                    }
+                } else {
+                    command.errorMessage = "Missing beacon ID";
                 }
                 break;
                 
             case CMD_EMERGENCY_STOP:
-                // 추가 파라미터 없음
+                command.isValid = true;
                 break;
                 
             default:
-                command.type = CMD_UNKNOWN;
+                command.errorMessage = "Unknown command";
                 break;
         }
+    } else {
+        command.errorMessage = "No command specified";
     }
     
     return command;
 }
 
-String Communication::createResponse(const RobotStatus& status) {
-    StaticJsonDocument<300> doc;
-    doc["currentX"] = status.currentX;
-    doc["currentY"] = status.currentY;
-    doc["targetX"] = status.targetX;
-    doc["targetY"] = status.targetY;
-    doc["isMoving"] = status.isMoving;
-    doc["isEmergencyStop"] = status.isEmergencyStop;
-    doc["currentSpeed"] = status.currentSpeed;
-    doc["batteryLevel"] = status.batteryLevel;
-    doc["lastError"] = status.lastError;
-    
-    String response;
-    serializeJson(doc, response);
-    return response;
-}
-
 void Communication::updateStatus(const RobotStatus& status) {
     currentStatus = status;
-}
-
-RobotStatus Communication::getCurrentStatus() {
-    return currentStatus;
 }
 
 void Communication::setError(const String& error) {
@@ -361,8 +292,34 @@ String Communication::commandTypeToString(CommandType type) {
     }
 }
 
+String Communication::createJsonResponse(bool success, const String& message, const JsonDocument& data) {
+    StaticJsonDocument<200> response;
+    response["success"] = success;
+    response["message"] = message;
+    
+    if (!data.isNull()) {
+        // data를 response에 병합
+        for (JsonPair kv : data.as<JsonObject>()) {
+            response[kv.key()] = kv.value();
+        }
+    }
+    
+    String responseStr;
+    serializeJson(response, responseStr);
+    return responseStr;
+}
+
 void Communication::setCORSHeaders() {
     server.sendHeader("Access-Control-Allow-Origin", "*");
     server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+
+bool Communication::validateSpeed(int speed) {
+    return speed >= 0 && speed <= 255;
+}
+
+bool Communication::validateCoordinates(double x, double y) {
+    // 좌표 유효성 검사 (필요에 따라 수정)
+    return !isnan(x) && !isnan(y) && isfinite(x) && isfinite(y);
 }

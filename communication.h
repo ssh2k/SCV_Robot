@@ -34,7 +34,13 @@ struct MoveCommand {
     double x, y;
     int speed;
     String beaconId;
+    bool isValid;
+    String errorMessage;
 };
+
+// 콜백 함수 타입 정의
+typedef void (*CommandCallback)(const MoveCommand& command);
+typedef RobotStatus (*StatusCallback)();
 
 class Communication {
 public:
@@ -44,23 +50,22 @@ public:
     // 초기화
     void begin(const char* ssid, const char* password);
     
-    // WiFi 연결 상태 확인
+    // 콜백 설정 (메인 컨트롤러와 연결)
+    void setCommandCallback(CommandCallback callback);
+    void setStatusCallback(StatusCallback callback);
+    
+    // WiFi 관리
     bool isConnected();
+    String getLocalIP();
     
     // 웹서버 처리
     void handleClient();
     
     // 명령 처리
     MoveCommand parseCommand(const String& jsonCommand);
-    String createResponse(const RobotStatus& status);
     
     // 상태 업데이트
     void updateStatus(const RobotStatus& status);
-    
-    // 현재 상태 반환
-    RobotStatus getCurrentStatus();
-    
-    // 에러 메시지 설정
     void setError(const String& error);
 
 private:
@@ -71,13 +76,15 @@ private:
     const char* wifiSSID;
     const char* wifiPassword;
     
+    // 콜백 함수
+    CommandCallback commandCallback;
+    StatusCallback statusCallback;
+    
     // 웹서버 포트
     static const int SERVER_PORT = 80;
     
     // API 엔드포인트 핸들러
-    void handleRoot();
     void handleMove();
-    void handlePosition();
     void handleStatus();
     void handleEmergencyStop();
     void handleSetSpeed();
@@ -87,11 +94,15 @@ private:
     CommandType stringToCommandType(const String& str);
     String commandTypeToString(CommandType type);
     
+    // 응답 생성
+    String createJsonResponse(bool success, const String& message, const JsonDocument& data = JsonDocument());
+    
     // CORS 헤더 설정
     void setCORSHeaders();
     
-    // JSON 응답 생성
-    String createJsonResponse(bool success, const String& message, const JsonDocument& data);
+    // 입력 검증
+    bool validateSpeed(int speed);
+    bool validateCoordinates(double x, double y);
 };
 
 #endif
