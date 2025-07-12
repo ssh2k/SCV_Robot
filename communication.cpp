@@ -6,7 +6,7 @@ Communication::Communication() : server(SERVER_PORT) {
     commandCallback = nullptr;
     statusCallback = nullptr;
 
-    currentStatus = {0.0, 0.0, 0.0, 0.0, false, false, 200, 100.0, ""};
+    currentStatus = {0.0, 0.0, 0.0, 0.0, false, false, false, 200, 100.0, ""};
 }
 
 Communication::~Communication() {}
@@ -125,6 +125,7 @@ void Communication::handleClientRequest(WiFiClient& client, const String& method
         res["targetY"] = currentStatus.targetY;
         res["isMoving"] = currentStatus.isMoving;
         res["isEmergencyStop"] = currentStatus.isEmergencyStop;
+        res["isMapLearning"] = currentStatus.isMapLearning;
         res["currentSpeed"] = currentStatus.currentSpeed;
         res["batteryLevel"] = currentStatus.batteryLevel;
         res["lastError"] = currentStatus.lastError;
@@ -162,6 +163,39 @@ void Communication::handleClientRequest(WiFiClient& client, const String& method
             command.isValid = true;
             commandCallback(command);
             sendJsonResponse(client, 200, "{\"success\":true,\"message\":\"Speed updated\"}");
+        }
+
+    } else if (method == "POST" && path == "/learn-map") {
+        if (commandCallback) {
+            MoveCommand command;
+            command.type = CMD_LEARN_MAP;
+            command.isValid = true;
+            commandCallback(command);
+            sendJsonResponse(client, 200, "{\"success\":true,\"message\":\"Map learning started\"}");
+        } else {
+            sendJsonResponse(client, 500, "{\"success\":false,\"message\":\"Command handler not set\"}");
+        }
+
+    } else if (method == "POST" && path == "/apply-learned-map") {
+        if (commandCallback) {
+            MoveCommand command;
+            command.type = CMD_APPLY_LEARNED_MAP;
+            command.isValid = true;
+            commandCallback(command);
+            sendJsonResponse(client, 200, "{\"success\":true,\"message\":\"Learned map applied\"}");
+        } else {
+            sendJsonResponse(client, 500, "{\"success\":false,\"message\":\"Command handler not set\"}");
+        }
+
+    } else if (method == "POST" && path == "/clear-map") {
+        if (commandCallback) {
+            MoveCommand command;
+            command.type = CMD_CLEAR_MAP;
+            command.isValid = true;
+            commandCallback(command);
+            sendJsonResponse(client, 200, "{\"success\":true,\"message\":\"Map cleared\"}");
+        } else {
+            sendJsonResponse(client, 500, "{\"success\":false,\"message\":\"Command handler not set\"}");
         }
 
     } else {
@@ -255,6 +289,9 @@ CommandType Communication::stringToCommandType(const String& str) {
     if (str == "get_status") return CMD_GET_STATUS;
     if (str == "emergency_stop") return CMD_EMERGENCY_STOP;
     if (str == "set_speed") return CMD_SET_SPEED;
+    if (str == "learn_map") return CMD_LEARN_MAP;
+    if (str == "apply_learned_map") return CMD_APPLY_LEARNED_MAP;
+    if (str == "clear_map") return CMD_CLEAR_MAP;
     return CMD_UNKNOWN;
 }
 
@@ -266,6 +303,9 @@ String Communication::commandTypeToString(CommandType type) {
         case CMD_GET_STATUS: return "get_status";
         case CMD_EMERGENCY_STOP: return "emergency_stop";
         case CMD_SET_SPEED: return "set_speed";
+        case CMD_LEARN_MAP: return "learn_map";
+        case CMD_APPLY_LEARNED_MAP: return "apply_learned_map";
+        case CMD_CLEAR_MAP: return "clear_map";
         default: return "unknown";
     }
 }

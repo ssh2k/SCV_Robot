@@ -15,6 +15,9 @@ enum CommandType {
     CMD_GET_STATUS,
     CMD_EMERGENCY_STOP,
     CMD_SET_SPEED,
+    CMD_LEARN_MAP,           // 맵 학습 명령 추가
+    CMD_APPLY_LEARNED_MAP,   // 학습된 맵 적용
+    CMD_CLEAR_MAP,           // 맵 초기화
     CMD_UNKNOWN
 };
 
@@ -24,6 +27,7 @@ struct RobotStatus {
     double targetX, targetY;
     bool isMoving;
     bool isEmergencyStop;
+    bool isMapLearning;      // 맵 학습 상태 추가
     int currentSpeed;
     double batteryLevel;
     String lastError;

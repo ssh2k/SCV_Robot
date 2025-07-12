@@ -2,6 +2,7 @@
 #include "beaconManager.h"
 #include "pathfinder.h"
 #include "communication.h"
+#include "mapLearner.h"
 
 // --- 핀 설정 ---
 // 아두이노 R4 보드의 실제 연결된 핀 번호로 수정하세요.
@@ -20,11 +21,19 @@ const int GRID_WIDTH = 20;
 const int GRID_HEIGHT = 20;
 const double GRID_CELL_SIZE = 0.5; // 미터 단위
 
+// --- 시스템 설정 ---
+const unsigned long POSITION_UPDATE_INTERVAL = 1000; // 1초
+const unsigned long BEACON_SCAN_INTERVAL = 5000;     // 5초
+const double WAYPOINT_REACH_THRESHOLD = 0.3;        // 30cm
+const double ROTATION_THRESHOLD = 0.2;              // 약 11도
+const double LARGE_ROTATION_THRESHOLD = 0.8;        // 약 45도
+
 // --- 객체 생성 ---
 MotorControl motor(LEFT_MOTOR_PWM_PIN, LEFT_MOTOR_DIR_PIN, RIGHT_MOTOR_PWM_PIN, RIGHT_MOTOR_DIR_PIN);
 BeaconManager beaconManager;
 Pathfinder pathfinder(GRID_WIDTH, GRID_HEIGHT);
 Communication communication;
+MapLearner mapLearner(&pathfinder, GRID_WIDTH, GRID_HEIGHT);
 
 // --- 전역 변수 ---
 RobotPosition currentPosition;
@@ -32,12 +41,12 @@ std::vector<PathPoint> currentPath;
 int currentPathIndex = 0;
 bool isNavigating = false;
 bool emergencyStop = false;
+bool isMapLearning = false;
 
 // --- 상태 변수 ---
 unsigned long lastPositionUpdate = 0;
 unsigned long lastBeaconScan = 0;
-const unsigned long POSITION_UPDATE_INTERVAL = 1000; // 1초
-const unsigned long BEACON_SCAN_INTERVAL = 5000;     // 5초
+unsigned long lastDebugTime = 0;
 
 void setup() {
     Serial.begin(9600);
@@ -45,11 +54,13 @@ void setup() {
 
     Serial.println("=== SCV Robot Initialization ===");
     
-    // 모터 초기화
+    // 1. 모터 초기화
     Serial.println("[Main] Initializing motor control...");
     motor.begin();
+    motor.setMaxSpeed(255);
+    motor.setMinSpeed(50);
     
-    // 비콘 관리자 초기화
+    // 2. 비콘 관리자 초기화
     Serial.println("[Main] Initializing beacon manager...");
     beaconManager.begin();
     
@@ -58,16 +69,23 @@ void setup() {
     beaconManager.setBeaconPosition(1, 10.0, 0.0);     // 비콘 2: (10, 0)
     beaconManager.setBeaconPosition(2, 5.0, 10.0);     // 비콘 3: (5, 10)
     
-    // 경로 탐색 초기화
+    // 3. 경로 탐색 초기화
     Serial.println("[Main] Initializing pathfinder...");
     pathfinder.begin();
     
-    // 장애물 설정 (예시)
-    setupObstacles();
+    // 4. 맵 학습 초기화
+    Serial.println("[Main] Initializing map learner...");
+    mapLearner.begin();
     
-    // 통신 초기화
+    // 5. 기본 장애물 설정 (외벽)
+    setupBasicObstacles();
+    
+    // 6. 통신 초기화
     Serial.println("[Main] Initializing communication...");
     communication.begin(WIFI_SSID, WIFI_PASSWORD);
+    
+    // 7. 콜백 함수 설정
+    setupCallbacks();
     
     Serial.println("[Main] Initialization complete!");
     Serial.println("=== SCV Robot Ready ===");
@@ -76,53 +94,55 @@ void setup() {
 void loop() {
     unsigned long currentTime = millis();
     
-    // WiFi 연결 확인
+    // 1. WiFi 연결 확인
     if (!communication.isConnected()) {
         Serial.println("[Main] WiFi disconnected. Attempting to reconnect...");
         // 재연결 로직은 communication 클래스에서 처리
     }
     
-    // 웹서버 클라이언트 처리
+    // 2. 웹서버 클라이언트 처리
     communication.handleClient();
     
-    // 비콘 스캔 및 위치 업데이트
+    // 3. 비콘 스캔 및 위치 업데이트
     if (currentTime - lastBeaconScan >= BEACON_SCAN_INTERVAL) {
-        Serial.println("[Main] Scanning beacons for position update...");
-        beaconManager.scanBeacons();
-        currentPosition = beaconManager.calculatePosition();
+        updatePositionFromBeacons();
         lastBeaconScan = currentTime;
-        
-        // 위치 신뢰도가 낮으면 경고
-        if (currentPosition.confidence < 0.5) {
-            Serial.println("[Main] Warning: Low position confidence");
-        }
     }
     
-    // 위치 기반 상태 업데이트
+    // 4. 위치 기반 상태 업데이트
     if (currentTime - lastPositionUpdate >= POSITION_UPDATE_INTERVAL) {
         updateRobotStatus();
         lastPositionUpdate = currentTime;
     }
     
-    // 경로 탐색 및 이동
+    // 5. 맵 학습 처리
+    if (isMapLearning) {
+        handleMapLearning();
+    }
+    
+    // 6. 경로 탐색 및 이동
     if (isNavigating && !emergencyStop) {
         navigateToTarget();
     }
     
-    // 긴급 정지 처리
+    // 7. 긴급 정지 처리
     if (emergencyStop) {
-        motor.emergencyStop();
-        isNavigating = false;
-        emergencyStop = false; // 한 번만 처리
-        Serial.println("[Main] Emergency stop processed");
+        handleEmergencyStop();
+    }
+    
+    // 8. 디버그 정보 출력
+    if (currentTime - lastDebugTime >= 5000) { // 5초마다
+        printDebugInfo();
+        lastDebugTime = currentTime;
     }
     
     delay(100); // 100ms 딜레이
 }
 
-void setupObstacles() {
-    // 예시 장애물 설정 (실제 환경에 맞게 수정)
-    // 벽이나 장애물이 있는 위치를 true로 설정
+// --- 초기화 함수들 ---
+
+void setupBasicObstacles() {
+    Serial.println("[Main] Setting up basic obstacles (walls)...");
     
     // 외벽 설정
     for (int x = 0; x < GRID_WIDTH; x++) {
@@ -134,22 +154,59 @@ void setupObstacles() {
         pathfinder.setObstacle(GRID_WIDTH-1, y, true); // 우측 벽
     }
     
-    // 중앙 장애물 예시
-    pathfinder.setObstacle(5, 5, true);
-    pathfinder.setObstacle(5, 6, true);
-    pathfinder.setObstacle(6, 5, true);
-    
-    Serial.println("[Main] Obstacles configured");
+    Serial.println("[Main] Basic obstacles configured");
 }
 
-void updateRobotStatus() {
+void setupCallbacks() {
+    // Communication 모듈에 콜백 함수 설정
+    communication.setCommandCallback(handleCommand);
+    communication.setStatusCallback(getRobotStatus);
+    Serial.println("[Main] Callbacks configured");
+}
+
+// --- 명령 처리 함수들 ---
+
+void handleCommand(const MoveCommand& command) {
+    switch (command.type) {
+        case CMD_MOVE_TO_POSITION:
+            moveToPosition(command.x, command.y, command.speed);
+            break;
+            
+        case CMD_EMERGENCY_STOP:
+            emergencyStopRobot();
+            break;
+            
+        case CMD_SET_SPEED:
+            setRobotSpeed(command.speed);
+            break;
+            
+        case CMD_LEARN_MAP:
+            learnMap();
+            break;
+            
+        case CMD_APPLY_LEARNED_MAP:
+            applyLearnedMap();
+            break;
+            
+        case CMD_CLEAR_MAP:
+            clearMap();
+            break;
+            
+        default:
+            Serial.println("[Main] Unknown command received");
+            break;
+    }
+}
+
+RobotStatus getRobotStatus() {
     RobotStatus status;
     status.currentX = currentPosition.x;
     status.currentY = currentPosition.y;
     status.isMoving = isNavigating;
     status.isEmergencyStop = emergencyStop;
-    status.currentSpeed = 200; // 기본 속도
-    status.batteryLevel = 100.0; // 배터리 레벨 (실제로는 배터리 모니터링 필요)
+    status.isMapLearning = isMapLearning;
+    status.currentSpeed = motor.getCurrentSpeed();
+    status.batteryLevel = getBatteryLevel();
     status.lastError = "";
     
     // 목표 위치 설정
@@ -162,8 +219,58 @@ void updateRobotStatus() {
         status.targetY = currentPosition.y;
     }
     
+    return status;
+}
+
+// --- 위치 업데이트 함수들 ---
+
+void updatePositionFromBeacons() {
+    Serial.println("[Main] Scanning beacons for position update...");
+    beaconManager.scanBeacons();
+    currentPosition = beaconManager.calculatePosition();
+    
+    // 위치 신뢰도가 낮으면 경고
+    if (currentPosition.confidence < 0.5) {
+        Serial.println("[Main] Warning: Low position confidence");
+    }
+    
+    Serial.print("[Main] Current position: (");
+    Serial.print(currentPosition.x);
+    Serial.print(", ");
+    Serial.print(currentPosition.y);
+    Serial.print("), Confidence: ");
+    Serial.println(currentPosition.confidence);
+}
+
+void updateRobotStatus() {
+    RobotStatus status = getRobotStatus();
     communication.updateStatus(status);
 }
+
+// --- 맵 학습 관련 함수들 ---
+
+void handleMapLearning() {
+    Serial.println("[Main] Starting map learning process...");
+    
+    // 맵 학습 실행
+    mapLearner.learnMap();
+    
+    // 학습된 맵을 pathfinder에 적용
+    mapLearner.applyLearnedMap();
+    
+    // 맵 학습 완료
+    isMapLearning = false;
+    Serial.println("[Main] Map learning completed");
+}
+
+void startMapLearning() {
+    Serial.println("[Main] Map learning requested");
+    isMapLearning = true;
+    isNavigating = false; // 네비게이션 중지
+    motor.softStop();     // 안전한 정지
+}
+
+// --- 네비게이션 관련 함수들 ---
 
 void navigateToTarget() {
     if (currentPath.empty() || currentPathIndex >= currentPath.size()) {
@@ -180,9 +287,9 @@ void navigateToTarget() {
     double targetY = target.y * GRID_CELL_SIZE;
     
     // 현재 위치에서 목표점까지의 거리 계산
-    double distance = sqrt(pow(targetX - currentPosition.x, 2) + pow(targetY - currentPosition.y, 2));
+    double distance = calculateDistance(currentPosition.x, currentPosition.y, targetX, targetY);
     
-    if (distance < 0.3) { // 30cm 이내에 도달
+    if (distance < WAYPOINT_REACH_THRESHOLD) {
         // 다음 경로점으로 이동
         currentPathIndex++;
         Serial.print("[Main] Reached waypoint ");
@@ -192,67 +299,117 @@ void navigateToTarget() {
         return;
     }
     
+    // 목표점까지의 방향 계산 및 이동 제어
+    executeMovementToTarget(targetX, targetY);
+}
+
+void executeMovementToTarget(double targetX, double targetY) {
     // 목표점까지의 방향 계산
     double angle = atan2(targetY - currentPosition.y, targetX - currentPosition.x);
     
-    // 로봇의 현재 방향 (간단한 구현, 실제로는 자이로스코프나 엔코더 필요)
-    double robotAngle = 0.0; // 실제로는 현재 방향을 추적해야 함
+    // 로봇의 현재 방향 (실제로는 자이로스코프나 엔코더 필요)
+    double robotAngle = getCurrentRobotAngle();
     
     // 회전 각도 계산
     double rotationAngle = angle - robotAngle;
     
     // 각도 정규화 (-π ~ π)
-    while (rotationAngle > PI) rotationAngle -= 2 * PI;
-    while (rotationAngle < -PI) rotationAngle += 2 * PI;
+    normalizeAngle(rotationAngle);
     
-    // 회전 및 이동 제어 (개선된 로직)
+    // 회전 및 이동 제어
     int baseSpeed = 200;
     int rotationSpeed = 150;
-    double rotationThreshold = 0.2; // 약 11도
     
-    if (abs(rotationAngle) > rotationThreshold) {
+    if (abs(rotationAngle) > ROTATION_THRESHOLD) {
         // 회전이 필요한 경우
-        if (abs(rotationAngle) > 0.8) { // 약 45도 이상
+        if (abs(rotationAngle) > LARGE_ROTATION_THRESHOLD) {
             // 제자리 회전
-            if (rotationAngle > 0) {
-                motor.turnLeft(rotationSpeed);
-            } else {
-                motor.turnRight(rotationSpeed);
-            }
+            executeRotation(rotationAngle, rotationSpeed);
         } else {
             // 곡선 이동 (회전하면서 전진)
-            int leftSpeed, rightSpeed;
-            if (rotationAngle > 0) {
-                // 좌회전하면서 전진
-                leftSpeed = baseSpeed * 0.6;
-                rightSpeed = baseSpeed;
-                motor.curveLeft(leftSpeed, rightSpeed);
-            } else {
-                // 우회전하면서 전진
-                leftSpeed = baseSpeed;
-                rightSpeed = baseSpeed * 0.6;
-                motor.curveRight(leftSpeed, rightSpeed);
-            }
+            executeCurvedMovement(rotationAngle, baseSpeed);
         }
     } else {
         // 직진
         motor.forward(baseSpeed);
     }
-    
-    // 디버그 정보 출력 (주기적으로)
-    static unsigned long lastDebugTime = 0;
-    if (millis() - lastDebugTime > 1000) { // 1초마다
-        Serial.print("[Main] Navigation - Distance: ");
-        Serial.print(distance);
-        Serial.print("m, Angle: ");
-        Serial.print(rotationAngle * 180 / PI);
-        Serial.print("°, State: ");
-        Serial.println(motor.getCurrentState());
-        lastDebugTime = millis();
+}
+
+void executeRotation(double rotationAngle, int rotationSpeed) {
+    if (rotationAngle > 0) {
+        motor.turnLeft(rotationSpeed);
+    } else {
+        motor.turnRight(rotationSpeed);
     }
 }
 
-// 외부에서 호출할 수 있는 함수들
+void executeCurvedMovement(double rotationAngle, int baseSpeed) {
+    int leftSpeed, rightSpeed;
+    if (rotationAngle > 0) {
+        // 좌회전하면서 전진
+        leftSpeed = baseSpeed * 0.6;
+        rightSpeed = baseSpeed;
+        motor.curveLeft(leftSpeed, rightSpeed);
+    } else {
+        // 우회전하면서 전진
+        leftSpeed = baseSpeed;
+        rightSpeed = baseSpeed * 0.6;
+        motor.curveRight(leftSpeed, rightSpeed);
+    }
+}
+
+// --- 유틸리티 함수들 ---
+
+double calculateDistance(double x1, double y1, double x2, double y2) {
+    return sqrt(pow(x2 - x1, 2) + pow(y2 - y1, 2));
+}
+
+void normalizeAngle(double& angle) {
+    while (angle > PI) angle -= 2 * PI;
+    while (angle < -PI) angle += 2 * PI;
+}
+
+double getCurrentRobotAngle() {
+    // 실제로는 자이로스코프나 엔코더로 구현
+    // 현재는 간단한 구현
+    return 0.0;
+}
+
+double getBatteryLevel() {
+    // 실제로는 배터리 모니터링 센서로 구현
+    // 현재는 고정값
+    return 100.0;
+}
+
+void handleEmergencyStop() {
+    motor.emergencyStop();
+    isNavigating = false;
+    isMapLearning = false;
+    emergencyStop = false; // 한 번만 처리
+    Serial.println("[Main] Emergency stop processed");
+}
+
+void printDebugInfo() {
+    Serial.println("=== SCV Robot Debug Info ===");
+    Serial.print("Position: (");
+    Serial.print(currentPosition.x);
+    Serial.print(", ");
+    Serial.print(currentPosition.y);
+    Serial.print("), Confidence: ");
+    Serial.println(currentPosition.confidence);
+    Serial.print("Navigation: ");
+    Serial.println(isNavigating ? "Active" : "Idle");
+    Serial.print("Map Learning: ");
+    Serial.println(isMapLearning ? "Active" : "Idle");
+    Serial.print("Motor State: ");
+    Serial.println(motor.getCurrentState());
+    Serial.print("Current Speed: ");
+    Serial.println(motor.getCurrentSpeed());
+    Serial.println("============================");
+}
+
+// --- 외부 명령 처리 함수들 ---
+
 void moveToPosition(double x, double y, int speed) {
     Serial.print("[Main] Moving to position (");
     Serial.print(x);
@@ -295,10 +452,27 @@ void emergencyStopRobot() {
     emergencyStop = true;
     motor.emergencyStop();
     isNavigating = false;
+    isMapLearning = false;
 }
 
 void setRobotSpeed(int speed) {
     Serial.print("[Main] Setting robot speed to ");
     Serial.println(speed);
-    // 속도 설정 로직 (필요시 모터 제어에 반영)
+    motor.setSpeed(speed);
+}
+
+void learnMap() {
+    Serial.println("[Main] Map learning requested");
+    startMapLearning();
+}
+
+void applyLearnedMap() {
+    Serial.println("[Main] Applying learned map");
+    mapLearner.applyLearnedMap();
+}
+
+void clearMap() {
+    Serial.println("[Main] Clearing map");
+    mapLearner.begin(); // 맵 초기화
+    setupBasicObstacles(); // 기본 장애물만 설정
 }
