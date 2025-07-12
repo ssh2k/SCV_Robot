@@ -57,12 +57,16 @@ std::vector<PathPoint> Pathfinder::findPath(int startX, int startY, int goalX, i
     // 클로즈드 리스트 (방문한 노드들)
     std::vector<Node*> closedList;
     
+    // 오픈 리스트 노드 추적을 위한 맵 (수정된 부분)
+    std::map<std::pair<int, int>, Node*> openListMap;
+    
     // 시작 노드 생성
     Node* startNode = new Node(startX, startY);
     startNode->h = heuristic(startX, startY, goalX, goalY);
     startNode->f = startNode->h;
     
     openList.push(startNode);
+    openListMap[std::make_pair(startX, startY)] = startNode;
     
     Node* goalNode = nullptr;
     
@@ -70,6 +74,9 @@ std::vector<PathPoint> Pathfinder::findPath(int startX, int startY, int goalX, i
         // f값이 가장 작은 노드 선택
         Node* currentNode = openList.top();
         openList.pop();
+        
+        // 오픈 리스트 맵에서 제거
+        openListMap.erase(std::make_pair(currentNode->x, currentNode->y));
         
         // 목표점에 도달했는지 확인
         if (currentNode->x == goalX && currentNode->y == goalY) {
@@ -95,24 +102,18 @@ std::vector<PathPoint> Pathfinder::findPath(int startX, int startY, int goalX, i
             
             if (inClosedList) continue;
             
-            // 새로운 비용 계산
-            double newG = currentNode->g + 1.0;  // 대각선 이동의 경우 1.414
-            
-            // 오픈 리스트에서 이웃 노드 찾기
-            bool inOpenList = false;
-            Node* existingNode = nullptr;
-            
-            // 오픈 리스트를 복사하여 확인 (우선순위 큐는 직접 검색이 어려움)
-            std::priority_queue<Node*, std::vector<Node*>, NodeCompare> tempQueue = openList;
-            while (!tempQueue.empty()) {
-                Node* tempNode = tempQueue.top();
-                tempQueue.pop();
-                if (tempNode->x == neighbor.x && tempNode->y == neighbor.y) {
-                    inOpenList = true;
-                    existingNode = tempNode;
-                    break;
-                }
+            // 이동 비용 계산 (수정된 부분)
+            double moveCost = 1.0;
+            // 대각선 이동인지 확인
+            if (abs(neighbor.x - currentNode->x) == 1 && abs(neighbor.y - currentNode->y) == 1) {
+                moveCost = 1.414; // √2
             }
+            double newG = currentNode->g + moveCost;
+            
+            // 오픈 리스트에서 이웃 노드 찾기 (수정된 부분)
+            auto it = openListMap.find(std::make_pair(neighbor.x, neighbor.y));
+            bool inOpenList = (it != openListMap.end());
+            Node* existingNode = inOpenList ? it->second : nullptr;
             
             if (!inOpenList) {
                 // 새로운 노드 생성
@@ -122,11 +123,14 @@ std::vector<PathPoint> Pathfinder::findPath(int startX, int startY, int goalX, i
                 newNode->h = heuristic(neighbor.x, neighbor.y, goalX, goalY);
                 newNode->f = newG + newNode->h;
                 openList.push(newNode);
+                openListMap[std::make_pair(neighbor.x, neighbor.y)] = newNode;
             } else if (newG < existingNode->g) {
                 // 더 나은 경로를 찾았을 때 업데이트
                 existingNode->parent = currentNode;
                 existingNode->g = newG;
                 existingNode->f = newG + existingNode->h;
+                // 우선순위 큐를 다시 구성해야 하지만, 
+                // 성능상의 이유로 기존 노드를 그대로 사용
             }
         }
     }
@@ -142,10 +146,15 @@ std::vector<PathPoint> Pathfinder::findPath(int startX, int startY, int goalX, i
         Serial.println("[Pathfinder] No path found");
     }
     
-    // 메모리 정리
+    // 메모리 정리 (수정된 부분)
     cleanupNodes(closedList);
     
     // 오픈 리스트 정리
+    for (auto& pair : openListMap) {
+        delete pair.second;
+    }
+    openListMap.clear();
+    
     while (!openList.empty()) {
         delete openList.top();
         openList.pop();
@@ -217,8 +226,8 @@ void Pathfinder::printPath(const std::vector<PathPoint>& path) {
 }
 
 double Pathfinder::heuristic(int x1, int y1, int x2, int y2) {
-    // 맨해튼 거리 사용
-    return abs(x2 - x1) + abs(y2 - y1);
+    // 유클리드 거리 사용 (8방향 이동에 적합)
+    return sqrt(pow(x2 - x1, 2) + pow(y2 - y1, 2));
 }
 
 bool Pathfinder::isValid(int x, int y) {

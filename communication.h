@@ -2,9 +2,10 @@
 #define COMMUNICATION_H
 
 #include <Arduino.h>
-#include <WiFi.h>
-#include <WebServer.h>
-#include <ArduinoJson.h>
+#include <WiFiS3.h>
+#include <WiFiServer.h>
+#include <WiFiClient.h>
+#include <Arduino_JSON.h>
 
 // 명령 타입 정의
 enum CommandType {
@@ -46,61 +47,36 @@ class Communication {
 public:
     Communication();
     ~Communication();
-    
-    // 초기화
+
     void begin(const char* ssid, const char* password);
-    
-    // 콜백 설정 (메인 컨트롤러와 연결)
+
     void setCommandCallback(CommandCallback callback);
     void setStatusCallback(StatusCallback callback);
-    
-    // WiFi 관리
+
     bool isConnected();
     String getLocalIP();
-    
-    // 웹서버 처리
     void handleClient();
-    
-    // 명령 처리
+
     MoveCommand parseCommand(const String& jsonCommand);
-    
-    // 상태 업데이트
     void updateStatus(const RobotStatus& status);
     void setError(const String& error);
 
 private:
-    WebServer server;
+    WiFiServer server;
     RobotStatus currentStatus;
-    
-    // WiFi 설정
     const char* wifiSSID;
     const char* wifiPassword;
-    
-    // 콜백 함수
+
     CommandCallback commandCallback;
     StatusCallback statusCallback;
-    
-    // 웹서버 포트
+
     static const int SERVER_PORT = 80;
-    
-    // API 엔드포인트 핸들러
-    void handleMove();
-    void handleStatus();
-    void handleEmergencyStop();
-    void handleSetSpeed();
-    void handleNotFound();
-    
-    // JSON 파싱 헬퍼 함수
+
+    void handleClientRequest(WiFiClient& client, const String& method, const String& path, const String& body);
+    void sendJsonResponse(WiFiClient& client, int statusCode, const String& body);
     CommandType stringToCommandType(const String& str);
     String commandTypeToString(CommandType type);
-    
-    // 응답 생성
-    String createJsonResponse(bool success, const String& message, const JsonDocument& data = JsonDocument());
-    
-    // CORS 헤더 설정
-    void setCORSHeaders();
-    
-    // 입력 검증
+    String createJsonResponse(bool success, const String& message, JSONVar data = JSONVar());
     bool validateSpeed(int speed);
     bool validateCoordinates(double x, double y);
 };
