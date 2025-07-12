@@ -188,7 +188,7 @@ std::vector<PathPoint> Pathfinder::optimizePath(const std::vector<PathPoint>& pa
     
     optimizedPath.push_back(path.back());
     
-    // 경로 최적화 로그 제거
+
     
     return optimizedPath;
 }

@@ -51,10 +51,9 @@ void MapLearner::scanAtGrid(int gridX, int gridY) {
 }
 
 float MapLearner::getUltrasonicDistance(int angleDeg) {
-    // 실제 초음파 센서 연동 필요 (여기선 가상값)
-    // 예: 초음파 센서 회전 후 거리 측정
-    // return measured_distance;
-    return 1.0; // 임시값
+    // TODO: 실제 초음파 센서 연동 필요
+    // 현재는 더미 값 반환 (1.0m = 장애물 없음)
+    return 1.0;
 }
 
 void MapLearner::markObstacle(int gridX, int gridY) {

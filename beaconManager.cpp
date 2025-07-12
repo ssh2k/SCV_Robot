@@ -47,7 +47,7 @@ void BeaconManager::scanBeacons() {
                     beacons[i].rssi = peripheral.rssi();
                     beacons[i].distance = rssiToDistance(beacons[i].rssi);
 
-                    // 비콘 발견 로그 제거 - 필요시에만 출력
+
                 }
             }
         }
@@ -88,7 +88,7 @@ RobotPosition BeaconManager::calculatePosition() {
         currentPosition.confidence *= 0.5; // 신뢰도 감소
     }
 
-    // 위치 계산 결과 로그 제거
+
 
     return currentPosition;
 }
@@ -101,7 +101,7 @@ void BeaconManager::setBeaconPosition(int beaconIndex, double x, double y) {
     if (beaconIndex >= 0 && beaconIndex < NUM_BEACONS) {
         beacons[beaconIndex].x = x;
         beacons[beaconIndex].y = y;
-        // 비콘 위치 설정 로그 제거
+
     }
 }
 

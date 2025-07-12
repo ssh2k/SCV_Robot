@@ -256,8 +256,6 @@ void handleMapLearning() {
     isMapLearning = false;
 }
 
-// startMapLearning 함수 제거 - handleCommand에서 직접 처리
-
 // --- 네비게이션 관련 함수들 ---
 
 void navigateToTarget() {
@@ -341,8 +339,6 @@ void executeCurvedMovement(double rotationAngle, int baseSpeed) {
     }
 }
 
-// handleEmergencyStop 함수 제거 - loop()에서 직접 처리
-
 void printDebugInfo() {
     Serial.println("=== SCV Robot Debug Info ===");
     Serial.print("Position: (");
@@ -384,5 +380,3 @@ void moveToPosition(double x, double y, int speed) {
     isNavigating = true;
     emergencyStop = false;
 }
-
-// 불필요한 래퍼 함수들 제거 - handleCommand에서 직접 처리

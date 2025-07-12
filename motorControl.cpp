@@ -182,7 +182,7 @@ void MotorControl::softStop() {
     _softStopInitialLeft = _leftSpeed;
     _softStopInitialRight = _rightSpeed;
     
-    // 부드러운 정지 로그 제거
+
 }
 
 void MotorControl::softStopAsync() {
@@ -196,7 +196,7 @@ void MotorControl::startCalibration() {
     _updateState(MOTOR_CALIBRATING);
     _isCalibrated = false;
     
-    // 캘리브레이션 시작 로그 제거
+
 }
 
 void MotorControl::stopCalibration() {
@@ -204,7 +204,7 @@ void MotorControl::stopCalibration() {
         stop();
         _isCalibrated = true;
         
-        // 캘리브레이션 완료 로그 제거
+
     }
 }
 
@@ -217,11 +217,11 @@ void MotorControl::reset() {
     _isCalibrated = false;
     _softStopInProgress = false;
     
-    // 시스템 리셋 로그 제거
+
 }
 
 void MotorControl::testMotors() {
-    // 모터 테스트 시작 로그 제거
+
     
     // 왼쪽 모터 테스트
     setLeftMotor(100, MOTOR_FORWARD_DIR);
@@ -235,7 +235,7 @@ void MotorControl::testMotors() {
     setRightMotor(0, MOTOR_FORWARD_DIR);
     delay(200);
     
-    // 모터 테스트 완료 로그 제거
+
 }
 
 void MotorControl::printStatus() {
@@ -262,7 +262,7 @@ void MotorControl::printStatus() {
 void MotorControl::setSpeed(int speed) {
     _currentSpeed = _constrainSpeed(speed);
     
-    // 속도 설정 로그 제거
+
 }
 
 int MotorControl::getCurrentSpeed() const {
