@@ -3,6 +3,7 @@
 #include "pathfinder.h"
 #include "communication.h"
 #include "mapLearner.h"
+#include "utils.h"
 
 // --- 핀 설정 ---
 // 아두이노 R4 보드의 실제 연결된 핀 번호로 수정하세요.
@@ -142,8 +143,6 @@ void loop() {
 // --- 초기화 함수들 ---
 
 void setupBasicObstacles() {
-    Serial.println("[Main] Setting up basic obstacles (walls)...");
-    
     // 외벽 설정
     for (int x = 0; x < GRID_WIDTH; x++) {
         pathfinder.setObstacle(x, 0, true);           // 하단 벽
@@ -153,15 +152,12 @@ void setupBasicObstacles() {
         pathfinder.setObstacle(0, y, true);           // 좌측 벽
         pathfinder.setObstacle(GRID_WIDTH-1, y, true); // 우측 벽
     }
-    
-    Serial.println("[Main] Basic obstacles configured");
 }
 
 void setupCallbacks() {
     // Communication 모듈에 콜백 함수 설정
     communication.setCommandCallback(handleCommand);
     communication.setStatusCallback(getRobotStatus);
-    Serial.println("[Main] Callbacks configured");
 }
 
 // --- 명령 처리 함수들 ---
@@ -193,7 +189,6 @@ void handleCommand(const MoveCommand& command) {
             break;
             
         default:
-            Serial.println("[Main] Unknown command received");
             break;
     }
 }
@@ -212,8 +207,8 @@ RobotStatus getRobotStatus() {
     // 목표 위치 설정
     if (!currentPath.empty() && currentPathIndex < currentPath.size()) {
         PathPoint target = currentPath[currentPathIndex];
-        status.targetX = target.x * GRID_CELL_SIZE;
-        status.targetY = target.y * GRID_CELL_SIZE;
+        status.targetX = gridToWorld(target.x, GRID_CELL_SIZE);
+        status.targetY = gridToWorld(target.y, GRID_CELL_SIZE);
     } else {
         status.targetX = currentPosition.x;
         status.targetY = currentPosition.y;
@@ -225,7 +220,6 @@ RobotStatus getRobotStatus() {
 // --- 위치 업데이트 함수들 ---
 
 void updatePositionFromBeacons() {
-    Serial.println("[Main] Scanning beacons for position update...");
     beaconManager.scanBeacons();
     currentPosition = beaconManager.calculatePosition();
     
@@ -233,13 +227,6 @@ void updatePositionFromBeacons() {
     if (currentPosition.confidence < 0.5) {
         Serial.println("[Main] Warning: Low position confidence");
     }
-    
-    Serial.print("[Main] Current position: (");
-    Serial.print(currentPosition.x);
-    Serial.print(", ");
-    Serial.print(currentPosition.y);
-    Serial.print("), Confidence: ");
-    Serial.println(currentPosition.confidence);
 }
 
 void updateRobotStatus() {
@@ -250,8 +237,6 @@ void updateRobotStatus() {
 // --- 맵 학습 관련 함수들 ---
 
 void handleMapLearning() {
-    Serial.println("[Main] Starting map learning process...");
-    
     // 맵 학습 실행
     mapLearner.learnMap();
     
@@ -260,11 +245,9 @@ void handleMapLearning() {
     
     // 맵 학습 완료
     isMapLearning = false;
-    Serial.println("[Main] Map learning completed");
 }
 
 void startMapLearning() {
-    Serial.println("[Main] Map learning requested");
     isMapLearning = true;
     isNavigating = false; // 네비게이션 중지
     motor.softStop();     // 안전한 정지
@@ -277,25 +260,20 @@ void navigateToTarget() {
         // 경로 완료
         motor.softStop();
         isNavigating = false;
-        Serial.println("[Main] Navigation completed");
         return;
     }
     
     // 현재 목표점
     PathPoint target = currentPath[currentPathIndex];
-    double targetX = target.x * GRID_CELL_SIZE;
-    double targetY = target.y * GRID_CELL_SIZE;
+    double targetX = gridToWorld(target.x, GRID_CELL_SIZE);
+    double targetY = gridToWorld(target.y, GRID_CELL_SIZE);
     
-    // 현재 위치에서 목표점까지의 거리 계산
+    // 현재 위치에서 목표점까지의 거리 계산 (utils 함수 사용)
     double distance = calculateDistance(currentPosition.x, currentPosition.y, targetX, targetY);
     
     if (distance < WAYPOINT_REACH_THRESHOLD) {
         // 다음 경로점으로 이동
         currentPathIndex++;
-        Serial.print("[Main] Reached waypoint ");
-        Serial.print(currentPathIndex - 1);
-        Serial.print("/");
-        Serial.println(currentPath.size());
         return;
     }
     
@@ -358,77 +336,42 @@ void executeCurvedMovement(double rotationAngle, int baseSpeed) {
     }
 }
 
-// --- 유틸리티 함수들 ---
-
-double calculateDistance(double x1, double y1, double x2, double y2) {
-    return sqrt(pow(x2 - x1, 2) + pow(y2 - y1, 2));
-}
-
-void normalizeAngle(double& angle) {
-    while (angle > PI) angle -= 2 * PI;
-    while (angle < -PI) angle += 2 * PI;
-}
-
-double getCurrentRobotAngle() {
-    // 실제로는 자이로스코프나 엔코더로 구현
-    // 현재는 간단한 구현
-    return 0.0;
-}
-
-double getBatteryLevel() {
-    // 실제로는 배터리 모니터링 센서로 구현
-    // 현재는 고정값
-    return 100.0;
-}
-
 void handleEmergencyStop() {
     motor.emergencyStop();
     isNavigating = false;
     isMapLearning = false;
     emergencyStop = false; // 한 번만 처리
-    Serial.println("[Main] Emergency stop processed");
 }
 
 void printDebugInfo() {
     Serial.println("=== SCV Robot Debug Info ===");
     Serial.print("Position: (");
-    Serial.print(currentPosition.x);
+    Serial.print(currentPosition.x, 2);
     Serial.print(", ");
-    Serial.print(currentPosition.y);
+    Serial.print(currentPosition.y, 2);
     Serial.print("), Confidence: ");
-    Serial.println(currentPosition.confidence);
+    Serial.println(currentPosition.confidence, 2);
     Serial.print("Navigation: ");
     Serial.println(isNavigating ? "Active" : "Idle");
-    Serial.print("Map Learning: ");
-    Serial.println(isMapLearning ? "Active" : "Idle");
     Serial.print("Motor State: ");
     Serial.println(motor.getCurrentState());
-    Serial.print("Current Speed: ");
-    Serial.println(motor.getCurrentSpeed());
     Serial.println("============================");
 }
 
 // --- 외부 명령 처리 함수들 ---
 
 void moveToPosition(double x, double y, int speed) {
-    Serial.print("[Main] Moving to position (");
-    Serial.print(x);
-    Serial.print(", ");
-    Serial.print(y);
-    Serial.print(") at speed ");
-    Serial.println(speed);
     
-    // 그리드 좌표로 변환
-    int gridX = (int)(x / GRID_CELL_SIZE);
-    int gridY = (int)(y / GRID_CELL_SIZE);
-    int currentGridX = (int)(currentPosition.x / GRID_CELL_SIZE);
-    int currentGridY = (int)(currentPosition.y / GRID_CELL_SIZE);
+    // 그리드 좌표로 변환 (utils 함수 사용)
+    int gridX = worldToGrid(x, GRID_CELL_SIZE);
+    int gridY = worldToGrid(y, GRID_CELL_SIZE);
+    int currentGridX = worldToGrid(currentPosition.x, GRID_CELL_SIZE);
+    int currentGridY = worldToGrid(currentPosition.y, GRID_CELL_SIZE);
     
     // 경로 찾기
     currentPath = pathfinder.findPath(currentGridX, currentGridY, gridX, gridY);
     
     if (currentPath.empty()) {
-        Serial.println("[Main] No path found to target");
         communication.setError("No path found to target");
         return;
     }
@@ -436,19 +379,13 @@ void moveToPosition(double x, double y, int speed) {
     // 경로 최적화
     currentPath = pathfinder.optimizePath(currentPath);
     
-    // 경로 출력
-    pathfinder.printPath(currentPath);
-    
     // 네비게이션 시작
     currentPathIndex = 0;
     isNavigating = true;
     emergencyStop = false;
-    
-    Serial.println("[Main] Navigation started");
 }
 
 void emergencyStopRobot() {
-    Serial.println("[Main] Emergency stop activated");
     emergencyStop = true;
     motor.emergencyStop();
     isNavigating = false;
@@ -456,23 +393,18 @@ void emergencyStopRobot() {
 }
 
 void setRobotSpeed(int speed) {
-    Serial.print("[Main] Setting robot speed to ");
-    Serial.println(speed);
     motor.setSpeed(speed);
 }
 
 void learnMap() {
-    Serial.println("[Main] Map learning requested");
     startMapLearning();
 }
 
 void applyLearnedMap() {
-    Serial.println("[Main] Applying learned map");
     mapLearner.applyLearnedMap();
 }
 
 void clearMap() {
-    Serial.println("[Main] Clearing map");
     mapLearner.begin(); // 맵 초기화
     setupBasicObstacles(); // 기본 장애물만 설정
 }
