@@ -1,4 +1,5 @@
 #include "communication.h"
+#include "utils.h"
 
 Communication::Communication() : server(SERVER_PORT) {
     wifiSSID = nullptr;
@@ -57,8 +58,6 @@ void Communication::handleClient() {
     WiFiClient client = server.available();
     if (!client) return;
 
-    Serial.println("[Communication] New client connected");
-
     String request = "";
     while (client.connected()) {
         if (client.available()) {
@@ -78,8 +77,7 @@ void Communication::handleClient() {
         path = request.substring(firstSpace + 1, secondSpace);
     }
 
-    Serial.print("[Communication] Method: "); Serial.println(method);
-    Serial.print("[Communication] Path: "); Serial.println(path);
+    // 요청 정보 로그 제거 - 필요시에만 출력
 
     // Read body (if POST)
     String body = "";
@@ -93,7 +91,6 @@ void Communication::handleClient() {
 
     delay(1);
     client.stop();
-    Serial.println("[Communication] Client disconnected");
 }
 
 void Communication::handleClientRequest(WiFiClient& client, const String& method, const String& path, const String& body) {
@@ -315,5 +312,6 @@ bool Communication::validateSpeed(int speed) {
 }
 
 bool Communication::validateCoordinates(double x, double y) {
-    return !isnan(x) && !isnan(y) && isfinite(x) && isfinite(y);
+    // utils의 isValidCoordinate 함수 사용 (최대값은 100으로 설정)
+    return isValidCoordinate(x, y, 100.0, 100.0);
 }

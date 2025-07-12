@@ -26,13 +26,11 @@ void MapLearner::clearLearnedGrid() {
 }
 
 void MapLearner::learnMap() {
-    Serial.println("[MapLearner] Start map learning...");
     for (int x = 0; x < gridWidth; x++) {
         for (int y = 0; y < gridHeight; y++) {
             scanAtGrid(x, y);
         }
     }
-    Serial.println("[MapLearner] Map learning complete.");
 }
 
 void MapLearner::scanAtGrid(int gridX, int gridY) {
@@ -64,11 +62,9 @@ void MapLearner::markObstacle(int gridX, int gridY) {
 }
 
 void MapLearner::applyLearnedMap() {
-    Serial.println("[MapLearner] Applying learned map to pathfinder...");
     for (int x = 0; x < gridWidth; x++) {
         for (int y = 0; y < gridHeight; y++) {
             pathfinder->setObstacle(x, y, learnedGrid[y][x]);
         }
     }
-    Serial.println("[MapLearner] Map applied.");
 } 

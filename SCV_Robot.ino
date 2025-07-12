@@ -128,7 +128,10 @@ void loop() {
     
     // 7. 긴급 정지 처리
     if (emergencyStop) {
-        handleEmergencyStop();
+        motor.emergencyStop();
+        isNavigating = false;
+        isMapLearning = false;
+        emergencyStop = false; // 한 번만 처리
     }
     
     // 8. 디버그 정보 출력
@@ -169,23 +172,29 @@ void handleCommand(const MoveCommand& command) {
             break;
             
         case CMD_EMERGENCY_STOP:
-            emergencyStopRobot();
+            emergencyStop = true;
+            motor.emergencyStop();
+            isNavigating = false;
+            isMapLearning = false;
             break;
             
         case CMD_SET_SPEED:
-            setRobotSpeed(command.speed);
+            motor.setSpeed(command.speed);
             break;
             
         case CMD_LEARN_MAP:
-            learnMap();
+            isMapLearning = true;
+            isNavigating = false;
+            motor.softStop();
             break;
             
         case CMD_APPLY_LEARNED_MAP:
-            applyLearnedMap();
+            mapLearner.applyLearnedMap();
             break;
             
         case CMD_CLEAR_MAP:
-            clearMap();
+            mapLearner.begin();
+            setupBasicObstacles();
             break;
             
         default:
@@ -247,11 +256,7 @@ void handleMapLearning() {
     isMapLearning = false;
 }
 
-void startMapLearning() {
-    isMapLearning = true;
-    isNavigating = false; // 네비게이션 중지
-    motor.softStop();     // 안전한 정지
-}
+// startMapLearning 함수 제거 - handleCommand에서 직접 처리
 
 // --- 네비게이션 관련 함수들 ---
 
@@ -336,12 +341,7 @@ void executeCurvedMovement(double rotationAngle, int baseSpeed) {
     }
 }
 
-void handleEmergencyStop() {
-    motor.emergencyStop();
-    isNavigating = false;
-    isMapLearning = false;
-    emergencyStop = false; // 한 번만 처리
-}
+// handleEmergencyStop 함수 제거 - loop()에서 직접 처리
 
 void printDebugInfo() {
     Serial.println("=== SCV Robot Debug Info ===");
@@ -385,26 +385,4 @@ void moveToPosition(double x, double y, int speed) {
     emergencyStop = false;
 }
 
-void emergencyStopRobot() {
-    emergencyStop = true;
-    motor.emergencyStop();
-    isNavigating = false;
-    isMapLearning = false;
-}
-
-void setRobotSpeed(int speed) {
-    motor.setSpeed(speed);
-}
-
-void learnMap() {
-    startMapLearning();
-}
-
-void applyLearnedMap() {
-    mapLearner.applyLearnedMap();
-}
-
-void clearMap() {
-    mapLearner.begin(); // 맵 초기화
-    setupBasicObstacles(); // 기본 장애물만 설정
-}
+// 불필요한 래퍼 함수들 제거 - handleCommand에서 직접 처리

@@ -1,4 +1,5 @@
 #include "motorControl.h"
+#include "utils.h"
 
 MotorControl::MotorControl(int left_pwm_pin, int left_dir_pin, int right_pwm_pin, int right_dir_pin) {
     _left_pwm_pin = left_pwm_pin;
@@ -42,31 +43,17 @@ void MotorControl::begin() {
     
     if (_loggingEnabled) {
         Serial.println("[MotorControl] Motor control system initialized");
-        Serial.print("[MotorControl] Left motor - PWM: ");
-        Serial.print(_left_pwm_pin);
-        Serial.print(", DIR: ");
-        Serial.println(_left_dir_pin);
-        Serial.print("[MotorControl] Right motor - PWM: ");
-        Serial.print(_right_pwm_pin);
-        Serial.print(", DIR: ");
-        Serial.println(_right_dir_pin);
     }
 }
 
 void MotorControl::setMaxSpeed(int maxSpeed) {
-    _maxSpeed = constrain(maxSpeed, 0, 255);
-    if (_loggingEnabled) {
-        Serial.print("[MotorControl] Max speed set to: ");
-        Serial.println(_maxSpeed);
-    }
+    _maxSpeed = constrainSpeed(maxSpeed, 0, 255);
+    // 로깅 제거 - 설정값은 필요시에만 출력
 }
 
 void MotorControl::setMinSpeed(int minSpeed) {
-    _minSpeed = constrain(minSpeed, 0, _maxSpeed);
-    if (_loggingEnabled) {
-        Serial.print("[MotorControl] Min speed set to: ");
-        Serial.println(_minSpeed);
-    }
+    _minSpeed = constrainSpeed(minSpeed, 0, _maxSpeed);
+    // 로깅 제거 - 설정값은 필요시에만 출력
 }
 
 void MotorControl::enableLogging(bool enable) {
@@ -134,12 +121,7 @@ void MotorControl::setLeftMotor(int speed, MotorDirection direction) {
     _leftSpeed = speed;
     _setMotorDirection(_left_pwm_pin, _left_dir_pin, speed);
     
-    if (_loggingEnabled) {
-        Serial.print("[MotorControl] Left motor set to: ");
-        Serial.print(direction == MOTOR_FORWARD_DIR ? "FORWARD" : "BACKWARD");
-        Serial.print(", Speed: ");
-        Serial.println(abs(speed));
-    }
+    // 개별 모터 설정 로그 제거
 }
 
 void MotorControl::setRightMotor(int speed, MotorDirection direction) {
@@ -152,12 +134,7 @@ void MotorControl::setRightMotor(int speed, MotorDirection direction) {
     _rightSpeed = speed;
     _setMotorDirection(_right_pwm_pin, _right_dir_pin, speed);
     
-    if (_loggingEnabled) {
-        Serial.print("[MotorControl] Right motor set to: ");
-        Serial.print(direction == MOTOR_FORWARD_DIR ? "FORWARD" : "BACKWARD");
-        Serial.print(", Speed: ");
-        Serial.println(abs(speed));
-    }
+    // 개별 모터 설정 로그 제거
 }
 
 void MotorControl::setLeftMotorSpeed(int speed) {
@@ -179,9 +156,7 @@ void MotorControl::stop() {
     _updateState(MOTOR_STOP);
     _softStopInProgress = false;
     
-    if (_loggingEnabled) {
-        Serial.println("[MotorControl] Motors stopped");
-    }
+    // 정지 로그 제거
 }
 
 void MotorControl::emergencyStop() {
@@ -207,9 +182,7 @@ void MotorControl::softStop() {
     _softStopInitialLeft = _leftSpeed;
     _softStopInitialRight = _rightSpeed;
     
-    if (_loggingEnabled) {
-        Serial.println("[MotorControl] Soft stop initiated");
-    }
+    // 부드러운 정지 로그 제거
 }
 
 void MotorControl::softStopAsync() {
@@ -223,9 +196,7 @@ void MotorControl::startCalibration() {
     _updateState(MOTOR_CALIBRATING);
     _isCalibrated = false;
     
-    if (_loggingEnabled) {
-        Serial.println("[MotorControl] Calibration started");
-    }
+    // 캘리브레이션 시작 로그 제거
 }
 
 void MotorControl::stopCalibration() {
@@ -233,9 +204,7 @@ void MotorControl::stopCalibration() {
         stop();
         _isCalibrated = true;
         
-        if (_loggingEnabled) {
-            Serial.println("[MotorControl] Calibration completed");
-        }
+        // 캘리브레이션 완료 로그 제거
     }
 }
 
@@ -248,15 +217,11 @@ void MotorControl::reset() {
     _isCalibrated = false;
     _softStopInProgress = false;
     
-    if (_loggingEnabled) {
-        Serial.println("[MotorControl] System reset");
-    }
+    // 시스템 리셋 로그 제거
 }
 
 void MotorControl::testMotors() {
-    if (_loggingEnabled) {
-        Serial.println("[MotorControl] Testing motors...");
-    }
+    // 모터 테스트 시작 로그 제거
     
     // 왼쪽 모터 테스트
     setLeftMotor(100, MOTOR_FORWARD_DIR);
@@ -270,9 +235,7 @@ void MotorControl::testMotors() {
     setRightMotor(0, MOTOR_FORWARD_DIR);
     delay(200);
     
-    if (_loggingEnabled) {
-        Serial.println("[MotorControl] Motor test completed");
-    }
+    // 모터 테스트 완료 로그 제거
 }
 
 void MotorControl::printStatus() {
@@ -299,10 +262,7 @@ void MotorControl::printStatus() {
 void MotorControl::setSpeed(int speed) {
     _currentSpeed = _constrainSpeed(speed);
     
-    if (_loggingEnabled) {
-        Serial.print("[MotorControl] Speed set to: ");
-        Serial.println(_currentSpeed);
-    }
+    // 속도 설정 로그 제거
 }
 
 int MotorControl::getCurrentSpeed() const {
@@ -350,7 +310,7 @@ void MotorControl::_updateState(MotorState newState) {
 }
 
 int MotorControl::_constrainSpeed(int speed) {
-    return constrain(speed, _minSpeed, _maxSpeed);
+    return constrainSpeed(speed, _minSpeed, _maxSpeed);
 }
 
 bool MotorControl::_validateSpeed(int speed) {

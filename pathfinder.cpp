@@ -1,4 +1,5 @@
 #include "pathfinder.h"
+#include "utils.h"
 
 Pathfinder::Pathfinder(int width, int height) : gridWidth(width), gridHeight(height) {
     // 2차원 배열 동적 할당
@@ -28,26 +29,14 @@ void Pathfinder::begin() {
 }
 
 std::vector<PathPoint> Pathfinder::findPath(int startX, int startY, int goalX, int goalY) {
-    Serial.println("[Pathfinder] Starting A* pathfinding...");
-    Serial.print("[Pathfinder] Start: (");
-    Serial.print(startX);
-    Serial.print(", ");
-    Serial.print(startY);
-    Serial.print("), Goal: (");
-    Serial.print(goalX);
-    Serial.print(", ");
-    Serial.print(goalY);
-    Serial.println(")");
     
     // 시작점과 목표점이 유효한지 확인
     if (!isValid(startX, startY) || !isValid(goalX, goalY)) {
-        Serial.println("[Pathfinder] Invalid start or goal position");
         return std::vector<PathPoint>();
     }
     
     // 시작점이 장애물인지 확인
     if (isObstacle(startX, startY) || isObstacle(goalX, goalY)) {
-        Serial.println("[Pathfinder] Start or goal position is blocked");
         return std::vector<PathPoint>();
     }
     
@@ -139,11 +128,6 @@ std::vector<PathPoint> Pathfinder::findPath(int startX, int startY, int goalX, i
     std::vector<PathPoint> path;
     if (goalNode) {
         path = reconstructPath(goalNode);
-        Serial.print("[Pathfinder] Path found with ");
-        Serial.print(path.size());
-        Serial.println(" points");
-    } else {
-        Serial.println("[Pathfinder] No path found");
     }
     
     // 메모리 정리 (수정된 부분)
@@ -204,10 +188,7 @@ std::vector<PathPoint> Pathfinder::optimizePath(const std::vector<PathPoint>& pa
     
     optimizedPath.push_back(path.back());
     
-    Serial.print("[Pathfinder] Path optimized: ");
-    Serial.print(path.size());
-    Serial.print(" -> ");
-    Serial.println(optimizedPath.size());
+    // 경로 최적화 로그 제거
     
     return optimizedPath;
 }
@@ -226,8 +207,8 @@ void Pathfinder::printPath(const std::vector<PathPoint>& path) {
 }
 
 double Pathfinder::heuristic(int x1, int y1, int x2, int y2) {
-    // 유클리드 거리 사용 (8방향 이동에 적합)
-    return sqrt(pow(x2 - x1, 2) + pow(y2 - y1, 2));
+    // utils의 calculateDistance 함수 사용
+    return calculateDistance(x1, y1, x2, y2);
 }
 
 bool Pathfinder::isValid(int x, int y) {

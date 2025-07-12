@@ -1,4 +1,5 @@
 #include "beaconManager.h"
+#include "utils.h"
 
 BeaconManager::BeaconManager() {
     // 비콘 초기값 설정
@@ -30,8 +31,6 @@ bool BeaconManager::begin() {
 }
 
 void BeaconManager::scanBeacons() {
-    Serial.println("[BeaconManager] Scanning for beacons...");
-
     BLE.scanForUuid("FEAA"); // Eddystone UUID 예시, 필요 시 수정
 
     unsigned long startTime = millis();
@@ -48,12 +47,7 @@ void BeaconManager::scanBeacons() {
                     beacons[i].rssi = peripheral.rssi();
                     beacons[i].distance = rssiToDistance(beacons[i].rssi);
 
-                    Serial.print("[BeaconManager] Found beacon ");
-                    Serial.print(i);
-                    Serial.print(": RSSI=");
-                    Serial.print(beacons[i].rssi);
-                    Serial.print(", Distance=");
-                    Serial.println(beacons[i].distance);
+                    // 비콘 발견 로그 제거 - 필요시에만 출력
                 }
             }
         }
@@ -94,14 +88,7 @@ RobotPosition BeaconManager::calculatePosition() {
         currentPosition.confidence *= 0.5; // 신뢰도 감소
     }
 
-    Serial.print("[BeaconManager] Position calculated: (");
-    Serial.print(currentPosition.x);
-    Serial.print(", ");
-    Serial.print(currentPosition.y);
-    Serial.print("), Confidence: ");
-    Serial.print(currentPosition.confidence);
-    Serial.print(", Valid beacons: ");
-    Serial.println(validBeacons);
+    // 위치 계산 결과 로그 제거
 
     return currentPosition;
 }
@@ -114,13 +101,7 @@ void BeaconManager::setBeaconPosition(int beaconIndex, double x, double y) {
     if (beaconIndex >= 0 && beaconIndex < NUM_BEACONS) {
         beacons[beaconIndex].x = x;
         beacons[beaconIndex].y = y;
-        Serial.print("[BeaconManager] Beacon ");
-        Serial.print(beaconIndex);
-        Serial.print(" position set to (");
-        Serial.print(x);
-        Serial.print(", ");
-        Serial.print(y);
-        Serial.println(")");
+        // 비콘 위치 설정 로그 제거
     }
 }
 
@@ -191,10 +172,10 @@ RobotPosition BeaconManager::trilateration(BeaconInfo b1, BeaconInfo b2, BeaconI
         pos.x = (E * D - B * F) / det;
         pos.y = (A * F - E * C) / det;
         
-        // 신뢰도 계산 (거리 오차 기반)
-        double error1 = abs(sqrt(pow(pos.x - x1, 2) + pow(pos.y - y1, 2)) - r1);
-        double error2 = abs(sqrt(pow(pos.x - x2, 2) + pow(pos.y - y2, 2)) - r2);
-        double error3 = abs(sqrt(pow(pos.x - x3, 2) + pow(pos.y - y3, 2)) - r3);
+        // 신뢰도 계산 (거리 오차 기반) - utils 함수 사용
+        double error1 = abs(calculateDistance(pos.x, pos.y, x1, y1) - r1);
+        double error2 = abs(calculateDistance(pos.x, pos.y, x2, y2) - r2);
+        double error3 = abs(calculateDistance(pos.x, pos.y, x3, y3) - r3);
         
         double avgError = (error1 + error2 + error3) / 3.0;
         pos.confidence = max(0.0, 1.0 - avgError / 2.0); // 오차가 클수록 신뢰도 감소
