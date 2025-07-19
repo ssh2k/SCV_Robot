@@ -5,13 +5,16 @@
 #include "mapLearner.h"
 #include "utils.h"
 
-// --- 핀 설정 ---
-// 아두이노 R4 보드의 실제 연결된 핀 번호로 수정하세요.
-// PWM 기능이 있는 핀(~)을 PWM 핀으로 사용해야 합니다. (예: 3, 5, 6, 9, 10, 11)
-#define LEFT_MOTOR_PWM_PIN  9
-#define LEFT_MOTOR_DIR_PIN  8
-#define RIGHT_MOTOR_PWM_PIN 10
-#define RIGHT_MOTOR_DIR_PIN 11
+// --- 핀 설정 (Pololu Dual TB9051FTG Motor Driver Shield) ---
+// 모터 1 (왼쪽 모터)
+#define LEFT_MOTOR_IN1_PIN  7   // M1IN1
+#define LEFT_MOTOR_IN2_PIN  8   // M1IN2
+#define LEFT_MOTOR_PWM_PIN  9   // M1PWM
+
+// 모터 2 (오른쪽 모터)
+#define RIGHT_MOTOR_IN1_PIN 10  // M2IN1
+#define RIGHT_MOTOR_IN2_PIN 11  // M2IN2
+#define RIGHT_MOTOR_PWM_PIN 3   // M2PWM
 
 // --- WiFi 설정 ---
 const char* WIFI_SSID = "your_wifi_ssid";
@@ -29,8 +32,9 @@ const double WAYPOINT_REACH_THRESHOLD = 0.3;        // 30cm
 const double ROTATION_THRESHOLD = 0.2;              // 약 11도
 const double LARGE_ROTATION_THRESHOLD = 0.8;        // 약 45도
 
-// --- 객체 생성 ---
-MotorControl motor(LEFT_MOTOR_PWM_PIN, LEFT_MOTOR_DIR_PIN, RIGHT_MOTOR_PWM_PIN, RIGHT_MOTOR_DIR_PIN);
+// --- 객체 생성 (Pololu TB9051FTG 3핀 제어 방식) ---
+MotorControl motor(LEFT_MOTOR_IN1_PIN, LEFT_MOTOR_IN2_PIN, LEFT_MOTOR_PWM_PIN,
+                  RIGHT_MOTOR_IN1_PIN, RIGHT_MOTOR_IN2_PIN, RIGHT_MOTOR_PWM_PIN);
 BeaconManager beaconManager;
 Pathfinder pathfinder(GRID_WIDTH, GRID_HEIGHT);
 Communication communication;

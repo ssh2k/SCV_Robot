@@ -26,4 +26,20 @@ bool isValidCoordinate(double x, double y, double maxX, double maxY);
 int worldToGrid(double worldCoord, double cellSize);
 double gridToWorld(int gridCoord, double cellSize);
 
+// Pololu TB9051FTG 모터 드라이버 관련 유틸리티
+// 모터 방향 설정 헬퍼 함수
+void setMotorDirection(int in1Pin, int in2Pin, int pwmPin, int speed);
+
+// 모터 안전 정지 함수
+void safeMotorStop(int in1Pin, int in2Pin, int pwmPin);
+
+// 모터 테스트 함수
+void testMotor(int in1Pin, int in2Pin, int pwmPin, const char* motorName);
+
+// 모터 속도 매핑 함수 (0-100%를 0-255로 변환)
+int mapSpeedPercent(int percent);
+
+// 모터 방향 검증 함수
+bool isValidMotorDirection(int speed);
+
 #endif 

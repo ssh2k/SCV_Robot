@@ -1,11 +1,14 @@
 #include "motorControl.h"
 #include "utils.h"
 
-MotorControl::MotorControl(int left_pwm_pin, int left_dir_pin, int right_pwm_pin, int right_dir_pin) {
+MotorControl::MotorControl(int left_in1_pin, int left_in2_pin, int left_pwm_pin, 
+                         int right_in1_pin, int right_in2_pin, int right_pwm_pin) {
+    _left_in1_pin = left_in1_pin;
+    _left_in2_pin = left_in2_pin;
     _left_pwm_pin = left_pwm_pin;
-    _left_dir_pin = left_dir_pin;
+    _right_in1_pin = right_in1_pin;
+    _right_in2_pin = right_in2_pin;
     _right_pwm_pin = right_pwm_pin;
-    _right_dir_pin = right_dir_pin;
     
     // 상태 초기화
     _currentState = MOTOR_STOP;
@@ -32,17 +35,19 @@ MotorControl::~MotorControl() {
 }
 
 void MotorControl::begin() {
-    // 핀 모드 설정
+    // Pololu TB9051FTG 3핀 모드 설정
+    pinMode(_left_in1_pin, OUTPUT);
+    pinMode(_left_in2_pin, OUTPUT);
     pinMode(_left_pwm_pin, OUTPUT);
-    pinMode(_left_dir_pin, OUTPUT);
+    pinMode(_right_in1_pin, OUTPUT);
+    pinMode(_right_in2_pin, OUTPUT);
     pinMode(_right_pwm_pin, OUTPUT);
-    pinMode(_right_dir_pin, OUTPUT);
     
     // 초기 상태 설정
     emergencyStop();
     
     if (_loggingEnabled) {
-        Serial.println("[MotorControl] Motor control system initialized");
+        Serial.println("[MotorControl] Pololu TB9051FTG motor control system initialized");
     }
 }
 
@@ -119,7 +124,7 @@ void MotorControl::setLeftMotor(int speed, MotorDirection direction) {
     }
     
     _leftSpeed = speed;
-    _setMotorDirection(_left_pwm_pin, _left_dir_pin, speed);
+    _setMotorDirection(_left_in1_pin, _left_in2_pin, _left_pwm_pin, speed);
     
     // 개별 모터 설정 로그 제거
 }
@@ -132,7 +137,7 @@ void MotorControl::setRightMotor(int speed, MotorDirection direction) {
     }
     
     _rightSpeed = speed;
-    _setMotorDirection(_right_pwm_pin, _right_dir_pin, speed);
+    _setMotorDirection(_right_in1_pin, _right_in2_pin, _right_pwm_pin, speed);
     
     // 개별 모터 설정 로그 제거
 }
@@ -141,14 +146,14 @@ void MotorControl::setLeftMotorSpeed(int speed) {
     if (!_validateSpeed(abs(speed))) return;
     
     _leftSpeed = speed;
-    _setMotorDirection(_left_pwm_pin, _left_dir_pin, speed);
+    _setMotorDirection(_left_in1_pin, _left_in2_pin, _left_pwm_pin, speed);
 }
 
 void MotorControl::setRightMotorSpeed(int speed) {
     if (!_validateSpeed(abs(speed))) return;
     
     _rightSpeed = speed;
-    _setMotorDirection(_right_pwm_pin, _right_dir_pin, speed);
+    _setMotorDirection(_right_in1_pin, _right_in2_pin, _right_pwm_pin, speed);
 }
 
 void MotorControl::stop() {
@@ -160,8 +165,12 @@ void MotorControl::stop() {
 }
 
 void MotorControl::emergencyStop() {
-    // 즉시 정지
+    // 즉시 정지 - 모든 핀을 LOW로 설정
+    digitalWrite(_left_in1_pin, LOW);
+    digitalWrite(_left_in2_pin, LOW);
     analogWrite(_left_pwm_pin, 0);
+    digitalWrite(_right_in1_pin, LOW);
+    digitalWrite(_right_in2_pin, LOW);
     analogWrite(_right_pwm_pin, 0);
     
     _currentState = MOTOR_STOP;
@@ -182,7 +191,9 @@ void MotorControl::softStop() {
     _softStopInitialLeft = _leftSpeed;
     _softStopInitialRight = _rightSpeed;
     
-
+    if (_loggingEnabled) {
+        Serial.println("[MotorControl] Soft stop initiated");
+    }
 }
 
 void MotorControl::softStopAsync() {
@@ -196,7 +207,9 @@ void MotorControl::startCalibration() {
     _updateState(MOTOR_CALIBRATING);
     _isCalibrated = false;
     
-
+    if (_loggingEnabled) {
+        Serial.println("[MotorControl] Motor calibration started");
+    }
 }
 
 void MotorControl::stopCalibration() {
@@ -204,7 +217,9 @@ void MotorControl::stopCalibration() {
         stop();
         _isCalibrated = true;
         
-
+        if (_loggingEnabled) {
+            Serial.println("[MotorControl] Motor calibration completed");
+        }
     }
 }
 
@@ -217,11 +232,15 @@ void MotorControl::reset() {
     _isCalibrated = false;
     _softStopInProgress = false;
     
-
+    if (_loggingEnabled) {
+        Serial.println("[MotorControl] Motor control system reset");
+    }
 }
 
 void MotorControl::testMotors() {
-
+    if (_loggingEnabled) {
+        Serial.println("[MotorControl] Starting motor test sequence");
+    }
     
     // 왼쪽 모터 테스트
     setLeftMotor(100, MOTOR_FORWARD_DIR);
@@ -235,7 +254,9 @@ void MotorControl::testMotors() {
     setRightMotor(0, MOTOR_FORWARD_DIR);
     delay(200);
     
-
+    if (_loggingEnabled) {
+        Serial.println("[MotorControl] Motor test sequence completed");
+    }
 }
 
 void MotorControl::printStatus() {
@@ -262,7 +283,10 @@ void MotorControl::printStatus() {
 void MotorControl::setSpeed(int speed) {
     _currentSpeed = _constrainSpeed(speed);
     
-
+    if (_loggingEnabled) {
+        Serial.print("[MotorControl] Speed set to: ");
+        Serial.println(_currentSpeed);
+    }
 }
 
 int MotorControl::getCurrentSpeed() const {
@@ -294,15 +318,28 @@ void MotorControl::_setMotorPins(int leftSpeed, int rightSpeed) {
     _leftSpeed = leftSpeed;
     _rightSpeed = rightSpeed;
     
-    _setMotorDirection(_left_pwm_pin, _left_dir_pin, leftSpeed);
-    _setMotorDirection(_right_pwm_pin, _right_dir_pin, rightSpeed);
+    _setMotorDirection(_left_in1_pin, _left_in2_pin, _left_pwm_pin, leftSpeed);
+    _setMotorDirection(_right_in1_pin, _right_in2_pin, _right_pwm_pin, rightSpeed);
 }
 
-void MotorControl::_setMotorDirection(int pwmPin, int dirPin, int speed) {
-    // 방향 설정
-    digitalWrite(dirPin, speed >= 0 ? HIGH : LOW);
-    // 속도 설정
-    analogWrite(pwmPin, abs(speed));
+// Pololu TB9051FTG 3핀 제어 방식
+void MotorControl::_setMotorDirection(int in1Pin, int in2Pin, int pwmPin, int speed) {
+    if (speed > 0) {
+        // 정방향
+        digitalWrite(in1Pin, HIGH);
+        digitalWrite(in2Pin, LOW);
+        analogWrite(pwmPin, speed);
+    } else if (speed < 0) {
+        // 역방향
+        digitalWrite(in1Pin, LOW);
+        digitalWrite(in2Pin, HIGH);
+        analogWrite(pwmPin, abs(speed));
+    } else {
+        // 정지
+        digitalWrite(in1Pin, LOW);
+        digitalWrite(in2Pin, LOW);
+        analogWrite(pwmPin, 0);
+    }
 }
 
 void MotorControl::_updateState(MotorState newState) {

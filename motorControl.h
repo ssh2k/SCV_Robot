@@ -21,11 +21,13 @@ enum MotorDirection {
     MOTOR_BACKWARD_DIR
 };
 
-// 모터 제어 클래스
+// 모터 제어 클래스 (Pololu TB9051FTG 3핀 제어 방식)
 class MotorControl {
 public:
-    // 생성자: 모터 제어에 필요한 핀 번호를 받아서 초기화합니다.
-    MotorControl(int left_pwm_pin, int left_dir_pin, int right_pwm_pin, int right_dir_pin);
+    // 생성자: Pololu TB9051FTG 3핀 제어 방식
+    // left_in1, left_in2, left_pwm, right_in1, right_in2, right_pwm
+    MotorControl(int left_in1_pin, int left_in2_pin, int left_pwm_pin, 
+                 int right_in1_pin, int right_in2_pin, int right_pwm_pin);
     
     // 소멸자
     ~MotorControl();
@@ -80,11 +82,13 @@ public:
     void printStatus();
 
 private:
-    // 핀 설정
+    // Pololu TB9051FTG 3핀 설정
+    int _left_in1_pin;
+    int _left_in2_pin;
     int _left_pwm_pin;
-    int _left_dir_pin;
+    int _right_in1_pin;
+    int _right_in2_pin;
     int _right_pwm_pin;
-    int _right_dir_pin;
     
     // 현재 상태
     MotorState _currentState;
@@ -111,7 +115,8 @@ private:
     void _logMotorAction(const char* action, int leftSpeed, int rightSpeed);
     void _updateSoftStop();
     bool _validateSpeed(int speed);
-    void _setMotorDirection(int pwmPin, int dirPin, int speed);
+    // Pololu TB9051FTG 3핀 제어 함수
+    void _setMotorDirection(int in1Pin, int in2Pin, int pwmPin, int speed);
 };
 
 #endif
