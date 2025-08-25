@@ -50,6 +50,7 @@ double gridToWorld(int gridCoord, double cellSize) {
 
 // 모터 방향 설정 헬퍼 함수
 void setMotorDirection(int in1Pin, int in2Pin, int pwmPin, int speed) {
+#ifdef ARDUINO
     if (speed > 0) {
         // 정방향
         digitalWrite(in1Pin, HIGH);
@@ -66,17 +67,25 @@ void setMotorDirection(int in1Pin, int in2Pin, int pwmPin, int speed) {
         digitalWrite(in2Pin, LOW);
         analogWrite(pwmPin, 0);
     }
+#else
+    (void)in1Pin; (void)in2Pin; (void)pwmPin; (void)speed;
+#endif
 }
 
 // 모터 안전 정지 함수
 void safeMotorStop(int in1Pin, int in2Pin, int pwmPin) {
+#ifdef ARDUINO
     digitalWrite(in1Pin, LOW);
     digitalWrite(in2Pin, LOW);
     analogWrite(pwmPin, 0);
+#else
+    (void)in1Pin; (void)in2Pin; (void)pwmPin;
+#endif
 }
 
 // 모터 테스트 함수
 void testMotor(int in1Pin, int in2Pin, int pwmPin, const char* motorName) {
+#ifdef ARDUINO
     Serial.print("[Utils] Testing ");
     Serial.println(motorName);
     
@@ -101,13 +110,21 @@ void testMotor(int in1Pin, int in2Pin, int pwmPin, const char* motorName) {
     delay(500);
     
     Serial.println("  - Test completed");
+#else
+    (void)in1Pin; (void)in2Pin; (void)pwmPin; (void)motorName;
+#endif
 }
 
 // 모터 속도 매핑 함수 (0-100%를 0-255로 변환)
 int mapSpeedPercent(int percent) {
     if (percent < 0) return 0;
     if (percent > 100) return 255;
+#ifdef ARDUINO
     return map(percent, 0, 100, 0, 255);
+#else
+    // 선형 매핑 대체
+    return static_cast<int>(percent * 2.55);
+#endif
 }
 
 // 모터 방향 검증 함수

@@ -1,5 +1,6 @@
 #include "pathfinder.h"
 #include "utils.h"
+#include <algorithm>
 
 Pathfinder::Pathfinder(int width, int height) : gridWidth(width), gridHeight(height) {
     // 2차원 배열 동적 할당
@@ -21,14 +22,22 @@ Pathfinder::~Pathfinder() {
 }
 
 void Pathfinder::begin() {
+#ifdef ARDUINO
     Serial.println("[Pathfinder] Initializing pathfinding system...");
     Serial.print("[Pathfinder] Grid size: ");
     Serial.print(gridWidth);
     Serial.print(" x ");
     Serial.println(gridHeight);
+#endif
 }
 
 std::vector<PathPoint> Pathfinder::findPath(int startX, int startY, int goalX, int goalY) {
+    // 캐시 조회
+    auto cacheKey = std::make_tuple(startX, startY, goalX, goalY);
+    auto cacheIt = pathCache.find(cacheKey);
+    if (cacheIt != pathCache.end()) {
+        return cacheIt->second;
+    }
     
     // 시작점과 목표점이 유효한지 확인
     if (!isValid(startX, startY) || !isValid(goalX, goalY)) {
@@ -42,20 +51,21 @@ std::vector<PathPoint> Pathfinder::findPath(int startX, int startY, int goalX, i
     
     // 오픈 리스트 (우선순위 큐)
     std::priority_queue<Node*, std::vector<Node*>, NodeCompare> openList;
-    
-    // 클로즈드 리스트 (방문한 노드들)
-    std::vector<Node*> closedList;
-    
-    // 오픈 리스트 노드 추적을 위한 맵 (수정된 부분)
-    std::map<std::pair<int, int>, Node*> openListMap;
+    // 방문 상태 및 최선 g/회전 저장
+    std::map<std::pair<int,int>, std::pair<double,int>> bestState; // {g, turnCount}
+    // 메모리 정리를 위한 노드 소유 컨테이너
+    std::vector<Node*> allNodes;
     
     // 시작 노드 생성
     Node* startNode = new Node(startX, startY);
     startNode->h = heuristic(startX, startY, goalX, goalY);
     startNode->f = startNode->h;
+    startNode->hasDirection = false;
+    startNode->turnCount = 0;
     
     openList.push(startNode);
-    openListMap[std::make_pair(startX, startY)] = startNode;
+    allNodes.push_back(startNode);
+    bestState[std::make_pair(startX, startY)] = std::make_pair(0.0, 0);
     
     Node* goalNode = nullptr;
     
@@ -64,8 +74,16 @@ std::vector<PathPoint> Pathfinder::findPath(int startX, int startY, int goalX, i
         Node* currentNode = openList.top();
         openList.pop();
         
-        // 오픈 리스트 맵에서 제거
-        openListMap.erase(std::make_pair(currentNode->x, currentNode->y));
+        // 스테일 노드 스킵: 현재 노드가 그 좌표의 최선 상태가 아니면 건너뜀
+        auto bsIt = bestState.find(std::make_pair(currentNode->x, currentNode->y));
+        if (bsIt != bestState.end()) {
+            double bestG = bsIt->second.first;
+            int bestTurns = bsIt->second.second;
+            if (currentNode->g - bestG > kEpsilon ||
+                (fabs(currentNode->g - bestG) <= kEpsilon && currentNode->turnCount > bestTurns)) {
+                continue;
+            }
+        }
         
         // 목표점에 도달했는지 확인
         if (currentNode->x == goalX && currentNode->y == goalY) {
@@ -73,24 +91,10 @@ std::vector<PathPoint> Pathfinder::findPath(int startX, int startY, int goalX, i
             break;
         }
         
-        // 클로즈드 리스트에 추가
-        closedList.push_back(currentNode);
-        
         // 이웃 노드들 확인
         std::vector<Node> neighbors = getNeighbors(*currentNode);
         
         for (const Node& neighbor : neighbors) {
-            // 이미 방문한 노드인지 확인
-            bool inClosedList = false;
-            for (Node* closedNode : closedList) {
-                if (closedNode->x == neighbor.x && closedNode->y == neighbor.y) {
-                    inClosedList = true;
-                    break;
-                }
-            }
-            
-            if (inClosedList) continue;
-            
             // 이동 비용 계산 (수정된 부분)
             double moveCost = 1.0;
             // 대각선 이동인지 확인
@@ -99,27 +103,41 @@ std::vector<PathPoint> Pathfinder::findPath(int startX, int startY, int goalX, i
             }
             double newG = currentNode->g + moveCost;
             
-            // 오픈 리스트에서 이웃 노드 찾기 (수정된 부분)
-            auto it = openListMap.find(std::make_pair(neighbor.x, neighbor.y));
-            bool inOpenList = (it != openListMap.end());
-            Node* existingNode = inOpenList ? it->second : nullptr;
-            
-            if (!inOpenList) {
-                // 새로운 노드 생성
+            // 방향 및 회전 계산
+            int stepDX = neighbor.x - currentNode->x;
+            int stepDY = neighbor.y - currentNode->y;
+            if (stepDX != 0) stepDX = (stepDX > 0) ? 1 : -1;
+            if (stepDY != 0) stepDY = (stepDY > 0) ? 1 : -1;
+            bool isTurn = currentNode->hasDirection && (currentNode->dirX != stepDX || currentNode->dirY != stepDY);
+            int newTurnCount = currentNode->turnCount + (isTurn ? 1 : 0);
+
+            // 베스트 상태와 비교하여 열 필요 여부 결정
+            auto key = std::make_pair(neighbor.x, neighbor.y);
+            auto bestIt = bestState.find(key);
+            bool shouldPush = false;
+            if (bestIt == bestState.end()) {
+                shouldPush = true;
+            } else {
+                double bestG = bestIt->second.first;
+                int bestTurns = bestIt->second.second;
+                if (newG + kEpsilon < bestG ||
+                    (fabs(newG - bestG) <= kEpsilon && newTurnCount < bestTurns)) {
+                    shouldPush = true;
+                }
+            }
+            if (shouldPush) {
                 Node* newNode = new Node(neighbor.x, neighbor.y);
                 newNode->parent = currentNode;
                 newNode->g = newG;
                 newNode->h = heuristic(neighbor.x, neighbor.y, goalX, goalY);
                 newNode->f = newG + newNode->h;
+                newNode->dirX = stepDX;
+                newNode->dirY = stepDY;
+                newNode->hasDirection = true;
+                newNode->turnCount = newTurnCount;
                 openList.push(newNode);
-                openListMap[std::make_pair(neighbor.x, neighbor.y)] = newNode;
-            } else if (newG < existingNode->g) {
-                // 더 나은 경로를 찾았을 때 업데이트
-                existingNode->parent = currentNode;
-                existingNode->g = newG;
-                existingNode->f = newG + existingNode->h;
-                // 우선순위 큐를 다시 구성해야 하지만, 
-                // 성능상의 이유로 기존 노드를 그대로 사용
+                allNodes.push_back(newNode);
+                bestState[key] = std::make_pair(newG, newTurnCount);
             }
         }
     }
@@ -130,19 +148,11 @@ std::vector<PathPoint> Pathfinder::findPath(int startX, int startY, int goalX, i
         path = reconstructPath(goalNode);
     }
     
-    // 메모리 정리 (수정된 부분)
-    cleanupNodes(closedList);
+    // 메모리 정리: 생성한 모든 노드 해제
+    cleanupNodes(allNodes);
     
-    // 오픈 리스트 정리
-    for (auto& pair : openListMap) {
-        delete pair.second;
-    }
-    openListMap.clear();
-    
-    while (!openList.empty()) {
-        delete openList.top();
-        openList.pop();
-    }
+    // 경로 캐시에 저장
+    pathCache[cacheKey] = path;
     
     return path;
 }
@@ -150,6 +160,8 @@ std::vector<PathPoint> Pathfinder::findPath(int startX, int startY, int goalX, i
 void Pathfinder::setObstacle(int x, int y, bool isObstacle) {
     if (isValid(x, y)) {
         grid[y][x] = isObstacle;
+        // 장애물 변경 시 캐시 무효화
+        clearCache();
     }
 }
 
@@ -171,7 +183,7 @@ std::vector<PathPoint> Pathfinder::optimizePath(const std::vector<PathPoint>& pa
         int dy = path[i + 1].y - path[i - 1].y;
         
         // 직선 경로상의 모든 점이 장애물이 아닌지 확인
-        int steps = max(abs(dx), abs(dy));
+        int steps = std::max(abs(dx), abs(dy));
         for (int step = 1; step < steps; step++) {
             int x = path[i - 1].x + (dx * step) / steps;
             int y = path[i - 1].y + (dy * step) / steps;
@@ -188,22 +200,23 @@ std::vector<PathPoint> Pathfinder::optimizePath(const std::vector<PathPoint>& pa
     
     optimizedPath.push_back(path.back());
     
-
-    
+    // 회전 최소화 관점에서 추가 개선 여지 있음
     return optimizedPath;
 }
 
 void Pathfinder::printPath(const std::vector<PathPoint>& path) {
+#ifdef ARDUINO
     Serial.println("[Pathfinder] Path:");
     for (size_t i = 0; i < path.size(); i++) {
         Serial.print("  ");
-        Serial.print(i);
+        Serial.print((int)i);
         Serial.print(": (");
         Serial.print(path[i].x);
         Serial.print(", ");
         Serial.print(path[i].y);
         Serial.println(")");
     }
+#endif
 }
 
 double Pathfinder::heuristic(int x1, int y1, int x2, int y2) {
@@ -251,4 +264,8 @@ void Pathfinder::cleanupNodes(std::vector<Node*>& nodes) {
         delete node;
     }
     nodes.clear();
+}
+
+void Pathfinder::clearCache() {
+    pathCache.clear();
 }

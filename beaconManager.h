@@ -37,6 +37,9 @@ public:
     // 비콘 위치 설정
     void setBeaconPosition(int beaconIndex, double x, double y);
 
+    // 현재 위치를 그리드 셀로 변환 (cellSize: m)
+    void getGridCell(double cellSize, int& gridX, int& gridY);
+
     // RSSI -> 거리 변환
     double rssiToDistance(int rssi);
 
@@ -44,7 +47,7 @@ public:
     RobotPosition trilateration(BeaconInfo beacon1, BeaconInfo beacon2, BeaconInfo beacon3);
 
 private:
-    static const int NUM_BEACONS = 3;
+    static const int NUM_BEACONS = 5;
     static const int SCAN_TIME_MS = 5000;  // 스캔 시간 밀리초
 
     BeaconInfo beacons[NUM_BEACONS];
@@ -54,8 +57,13 @@ private:
     String beaconAddresses[NUM_BEACONS] = {
         "BE:AC:ON:01:02:03",
         "BE:AC:ON:04:05:06",
-        "BE:AC:ON:07:08:09"
+        "BE:AC:ON:07:08:09",
+        "BE:AC:ON:0A:0B:0C",
+        "BE:AC:ON:0D:0E:0F"
     };
+
+    // 다중 비콘 최소자승 위치 추정 (유효 인덱스 배열 사용)
+    RobotPosition leastSquaresPosition(const int indices[], int count);
 };
 
 #endif

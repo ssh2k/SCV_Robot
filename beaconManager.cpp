@@ -1,5 +1,6 @@
 #include "beaconManager.h"
 #include "utils.h"
+#include <math.h>
 
 BeaconManager::BeaconManager() {
     // 비콘 초기값 설정
@@ -33,6 +34,12 @@ bool BeaconManager::begin() {
 void BeaconManager::scanBeacons() {
     BLE.scanForUuid("FEAA"); // Eddystone UUID 예시, 필요 시 수정
 
+    // 이전 값 초기화 (오래된 측정 제거)
+    for (int i = 0; i < NUM_BEACONS; i++) {
+        beacons[i].rssi = -100;
+        beacons[i].distance = -1.0;
+    }
+
     unsigned long startTime = millis();
 
     while (millis() - startTime < SCAN_TIME_MS) {
@@ -57,38 +64,56 @@ void BeaconManager::scanBeacons() {
 }
 
 RobotPosition BeaconManager::calculatePosition() {
-    int validBeacons = 0;
-    double totalConfidence = 0.0;
-    
-    // 유효한 비콘 개수 확인 및 거리 검증
+    // 유효한 비콘 인덱스 수집
+    int indices[NUM_BEACONS];
+    int count = 0;
     for (int i = 0; i < NUM_BEACONS; i++) {
         if (beacons[i].rssi > -100 && beacons[i].distance > 0) {
-            validBeacons++;
-            totalConfidence += 1.0;
+            indices[count++] = i;
         }
     }
 
-    if (validBeacons < 3) {
+    if (count < 3) {
         Serial.println("[BeaconManager] Not enough beacons for positioning");
         currentPosition.confidence = 0.0;
         return currentPosition;
     }
 
-    // 삼각측량으로 위치 계산
-    currentPosition = trilateration(beacons[0], beacons[1], beacons[2]);
-    
-    // 신뢰도 조정 (유효한 비콘 개수와 거리 오차 기반)
-    double beaconConfidence = totalConfidence / 3.0;
-    currentPosition.confidence = min(currentPosition.confidence, beaconConfidence);
-    
-    // 위치 범위 검증
-    if (currentPosition.x < -5 || currentPosition.x > 15 || 
-        currentPosition.y < -5 || currentPosition.y > 15) {
+    // 1차: 전체 유효 비콘으로 최소자승 추정
+    RobotPosition pos = leastSquaresPosition(indices, count);
+
+    // 이상치 제거: 잔차가 가장 큰 비콘을 하나 제외하고 재추정 (필요 시)
+    double maxResidual = -1.0;
+    int worstIdxInIndices = -1;
+    for (int k = 0; k < count; k++) {
+        int i = indices[k];
+        double d = calculateDistance(pos.x, pos.y, beacons[i].x, beacons[i].y);
+        double r = beacons[i].distance;
+        double res = fabs(d - r);
+        if (res > maxResidual) {
+            maxResidual = res;
+            worstIdxInIndices = k;
+        }
+    }
+
+    // 임계: 1.5m 이상 큰 잔차면 제거 후 재추정 (3개 이상 남아야 함)
+    if (maxResidual > 1.5 && count >= 4 && worstIdxInIndices >= 0) {
+        // 압축 이동
+        for (int k = worstIdxInIndices; k < count - 1; k++) {
+            indices[k] = indices[k + 1];
+        }
+        count -= 1;
+        pos = leastSquaresPosition(indices, count);
+    }
+
+    currentPosition = pos;
+
+    // 위치 범위 검증 (작업 공간 예시: 0~20m)
+    if (currentPosition.x < -5 || currentPosition.x > 25 || 
+        currentPosition.y < -5 || currentPosition.y > 25) {
         Serial.println("[BeaconManager] Position out of reasonable range");
         currentPosition.confidence *= 0.5; // 신뢰도 감소
     }
-
-
 
     return currentPosition;
 }
@@ -103,6 +128,11 @@ void BeaconManager::setBeaconPosition(int beaconIndex, double x, double y) {
         beacons[beaconIndex].y = y;
 
     }
+}
+
+void BeaconManager::getGridCell(double cellSize, int& gridX, int& gridY) {
+    gridX = worldToGrid(currentPosition.x, cellSize);
+    gridY = worldToGrid(currentPosition.y, cellSize);
 }
 
 double BeaconManager::rssiToDistance(int rssi) {
@@ -156,12 +186,12 @@ RobotPosition BeaconManager::trilateration(BeaconInfo b1, BeaconInfo b2, BeaconI
     // 행렬식 계산
     double det = A * D - B * C;
     
-    if (abs(det) < 0.0001) {
+    if (fabs(det) < 0.0001) {
         // 행렬이 특이한 경우 (비콘이 일직선상에 있거나 너무 가까움)
         // 가중 평균으로 대체
-        double w1 = 1.0 / (r1 + 0.1);
-        double w2 = 1.0 / (r2 + 0.1);
-        double w3 = 1.0 / (r3 + 0.1);
+        double w1 = 1.0 / (r1 * r1 + 1e-3);
+        double w2 = 1.0 / (r2 * r2 + 1e-3);
+        double w3 = 1.0 / (r3 * r3 + 1e-3);
         double totalW = w1 + w2 + w3;
         
         pos.x = (x1 * w1 + x2 * w2 + x3 * w3) / totalW;
@@ -173,13 +203,100 @@ RobotPosition BeaconManager::trilateration(BeaconInfo b1, BeaconInfo b2, BeaconI
         pos.y = (A * F - E * C) / det;
         
         // 신뢰도 계산 (거리 오차 기반) - utils 함수 사용
-        double error1 = abs(calculateDistance(pos.x, pos.y, x1, y1) - r1);
-        double error2 = abs(calculateDistance(pos.x, pos.y, x2, y2) - r2);
-        double error3 = abs(calculateDistance(pos.x, pos.y, x3, y3) - r3);
+        double error1 = fabs(calculateDistance(pos.x, pos.y, x1, y1) - r1);
+        double error2 = fabs(calculateDistance(pos.x, pos.y, x2, y2) - r2);
+        double error3 = fabs(calculateDistance(pos.x, pos.y, x3, y3) - r3);
         
         double avgError = (error1 + error2 + error3) / 3.0;
         pos.confidence = max(0.0, 1.0 - avgError / 2.0); // 오차가 클수록 신뢰도 감소
     }
     
+    return pos;
+}
+
+// 다중 비콘 최소자승 위치 추정
+RobotPosition BeaconManager::leastSquaresPosition(const int indices[], int count) {
+    RobotPosition pos;
+    if (count < 3) {
+        pos.x = 0.0;
+        pos.y = 0.0;
+        pos.confidence = 0.0;
+        return pos;
+    }
+
+    const int k = 0; // 기준 인덱스는 배열 내 첫 항목
+    const double xk = beacons[indices[k]].x;
+    const double yk = beacons[indices[k]].y;
+    const double rk = beacons[indices[k]].distance;
+
+    double S_AA = 0.0, S_AB = 0.0, S_BB = 0.0, S_AC = 0.0, S_BC = 0.0;
+    int used = 0;
+    for (int t = 1; t < count; t++) {
+        const int i = indices[t];
+        const double xi = beacons[i].x;
+        const double yi = beacons[i].y;
+        const double ri = beacons[i].distance;
+        if (ri <= 0) continue;
+        const double A = 2.0 * (xi - xk);
+        const double B = 2.0 * (yi - yk);
+        const double C = (rk * rk - ri * ri) - (xk * xk - xi * xi) - (yk * yk - yi * yi);
+        const double w = 1.0 / (ri * ri + 1e-3);
+        S_AA += w * A * A;
+        S_AB += w * A * B;
+        S_BB += w * B * B;
+        S_AC += w * A * C;
+        S_BC += w * B * C;
+        used++;
+    }
+
+    if (used < 2) {
+        pos.x = 0.0;
+        pos.y = 0.0;
+        pos.confidence = 0.0;
+        return pos;
+    }
+
+    const double det = S_AA * S_BB - S_AB * S_AB;
+    if (fabs(det) < 1e-9) {
+        // fallback: 가중 중심
+        double wsum = 0.0, xsum = 0.0, ysum = 0.0;
+        for (int t = 0; t < count; t++) {
+            const int i = indices[t];
+            const double xi = beacons[i].x;
+            const double yi = beacons[i].y;
+            const double ri = beacons[i].distance;
+            if (ri <= 0) continue;
+            const double w = 1.0 / (ri * ri + 1e-3);
+            xsum += xi * w; ysum += yi * w; wsum += w;
+        }
+        pos.x = xsum / (wsum > 0 ? wsum : 1.0);
+        pos.y = ysum / (wsum > 0 ? wsum : 1.0);
+        pos.confidence = 0.5;
+        return pos;
+    }
+
+    pos.x = ( S_BB * S_AC - S_AB * S_BC) / det;
+    pos.y = ( S_AA * S_BC - S_AB * S_AC) / det;
+
+    // 잔차 기반 신뢰도
+    double errSum = 0.0;
+    int v = 0;
+    for (int t = 0; t < count; t++) {
+        const int i = indices[t];
+        const double xi = beacons[i].x;
+        const double yi = beacons[i].y;
+        const double ri = beacons[i].distance;
+        if (ri <= 0) continue;
+        const double d = calculateDistance(pos.x, pos.y, xi, yi);
+        errSum += fabs(d - ri);
+        v++;
+    }
+    const double meanErr = (v > 0) ? (errSum / v) : 1e9;
+    if (meanErr > 10.0) {
+        pos.confidence = 0.0;
+    } else {
+        pos.confidence = max(0.0, 1.0 - meanErr / 2.0);
+    }
+
     return pos;
 }
